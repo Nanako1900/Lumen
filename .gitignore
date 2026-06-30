@@ -1,0 +1,48 @@
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# ---- Editors ----
+.idea/
+.vscode/
+*.swp
+
+# ---- Go (server + client backend) ----
+*.exe
+*.exe~
+*.dll
+*.test
+*.out
+/server/lumen-server
+/server/**/lumen-server
+vendor/
+
+# ---- Node / frontend (client/frontend + website) ----
+node_modules/
+dist/
+.svelte-kit/
+*.local
+.cache/
+
+# ---- Wails (client) ----
+/client/build/bin/
+/client/frontend/dist/
+/client/frontend/wailsjs/
+
+# ---- Cloudflare (website) ----
+.wrangler/
+.dev.vars
+/website/dist/
+
+# ---- Secrets / local config (NEVER commit) ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.*
+
+# ---- Build / coverage / logs ----
+coverage/
+*.log
+.omc/
