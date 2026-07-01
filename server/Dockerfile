@@ -1,0 +1,36 @@
+# Lumen 服务端多阶段构建（server-design.md §7.2）
+# 构建上下文 = server/ 目录（含 go.mod / go.sum / cmd / internal）。
+# pgx + pion 均为纯 Go，CGO_ENABLED=0 静态构建，契合 alpine。
+
+# ---- build ----
+# 注：设计文档锁 Go 1.23，但当前安全基线依赖（pion/webrtc ≥v4.2.5 的传递依赖
+# ice/v4、dtls/v3，以及 pgx v5、go-oidc v3）已将最低 Go 版本提到 1.24。为保住
+# CVE-2026-26014 修复等安全不变量，构建 Go 提升到 1.24（1.24 对本项目源码向后兼容）。
+FROM golang:1.24-alpine AS build
+WORKDIR /src
+
+# 先拷依赖清单以复用 layer 缓存。
+COPY go.mod go.sum ./
+RUN go mod download
+
+# 拷源码并构建静态二进制。
+COPY . .
+ENV CGO_ENABLED=0
+RUN go build -trimpath -ldflags="-s -w" -o /out/lumen-server ./cmd/lumen-server
+
+# ---- runtime ----
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 10001 app
+WORKDIR /app
+COPY --from=build /out/lumen-server /app/lumen-server
+
+# 自动更新静态托管目录（LUMEN_UPDATES_DIR 默认值），由 Coolify Persistent Storage 挂载。
+RUN mkdir -p /app/updates && chown -R app:app /app
+
+# 8080     = 信令/HTTP/WS（给 Traefik；Coolify Ports Exposes 第一个=健康检查口）
+# 40000/udp = WebRTC 媒体单口（给 host 直发，Coolify Ports Mappings，绕过 Traefik）
+EXPOSE 8080
+EXPOSE 40000/udp
+
+USER app
+ENTRYPOINT ["/app/lumen-server"]

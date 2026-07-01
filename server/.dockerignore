@@ -1,0 +1,10 @@
+# Keep the build context minimal and never ship secrets.
+.env
+.env.*
+!.env.example
+*_test.go
+lumen-server
+coverage/
+*.out
+*.log
+README.md
