@@ -43,7 +43,7 @@ jobs:
         if: steps.check.outputs.exists == 'true'
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
           cache-dependency-path: server/go.sum
 
       - name: gofmt (check formatting)
@@ -129,7 +129,7 @@ jobs:
         if: steps.check.outputs.exists == 'true'
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
 
       - name: Setup Node
         if: steps.check.outputs.exists == 'true'
