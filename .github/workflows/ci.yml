@@ -1,7 +1,14 @@
 name: CI
 
-# 骨架级 CI：各 job 仅在对应包已落地代码时执行（用 hashFiles 守卫），
-# 在仅有文档/骨架的当前阶段不会失败；代码进来后自动开始 build/test。
+# Monorepo CI（三端）。
+# 每个 job 用一个「存在守卫」步骤探测该端是否已落地代码：
+#   - server:  server/go.mod
+#   - website: website/package.json
+#   - client:  client/wails.json
+# 守卫未命中时后续步骤全部 skip —— 当前仅有文档/骨架，CI 为绿；
+# A/B/C 分支合入真实代码后，同一 workflow 自动转为真实 build/vet/test。
+#
+# 设计：docs/design/00-overview.md §7、server-design §6.1/§7；Issue #2。
 
 on:
   push:
@@ -9,65 +16,132 @@ on:
   pull_request:
     branches: [main]
 
+# 顶层最小权限；按需在 job 覆盖。
 permissions:
   contents: read
 
+# 同一 ref 的旧运行自动取消，节省额度。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # ── 服务端（Go 1.23，CGO_ENABLED=0）──────────────────────────────
   server:
     name: server (Go)
     runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: '0'
     steps:
       - uses: actions/checkout@v4
-      - id: check
+
+      - name: Detect server code
+        id: check
         run: echo "exists=$([ -f server/go.mod ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-      - if: steps.check.outputs.exists == 'true'
+
+      - name: Setup Go
+        if: steps.check.outputs.exists == 'true'
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
           cache-dependency-path: server/go.sum
-      - if: steps.check.outputs.exists == 'true'
+
+      - name: gofmt (check formatting)
+        if: steps.check.outputs.exists == 'true'
         working-directory: server
         run: |
-          go build ./...
-          go vet ./...
-          go test ./... || true   # 测试齐备前允许通过；补齐后移除 || true
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::以下文件未通过 gofmt，请运行 'gofmt -w .':"
+            echo "$unformatted"
+            exit 1
+          fi
 
+      - name: Build
+        if: steps.check.outputs.exists == 'true'
+        working-directory: server
+        run: go build ./...
+
+      - name: Vet
+        if: steps.check.outputs.exists == 'true'
+        working-directory: server
+        run: go vet ./...
+
+      - name: Test (race + coverage)
+        if: steps.check.outputs.exists == 'true'
+        working-directory: server
+        run: go test -race -coverprofile=coverage.out ./...
+
+  # ── 官网（Node 20，Cloudflare Pages 构建产物）────────────────────
   website:
     name: website (React/Cloudflare)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - id: check
+
+      - name: Detect website code
+        id: check
         run: echo "exists=$([ -f website/package.json ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-      - if: steps.check.outputs.exists == 'true'
+
+      - name: Setup Node
+        if: steps.check.outputs.exists == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
           cache-dependency-path: website/package-lock.json
-      - if: steps.check.outputs.exists == 'true'
+
+      - name: Install (npm ci)
+        if: steps.check.outputs.exists == 'true'
+        working-directory: website
+        run: npm ci
+
+      - name: Build
+        if: steps.check.outputs.exists == 'true'
+        working-directory: website
+        run: npm run build
+
+      # test 脚本存在才跑（避免骨架期因缺 "test" 脚本而红）。
+      - name: Test
+        if: steps.check.outputs.exists == 'true'
         working-directory: website
         run: |
-          npm ci
-          npm run build
+          if npm run | grep -qE '^\s*test'; then
+            npm test
+          else
+            echo "website: 无 test 脚本，跳过（补齐后自动执行）"
+          fi
 
+  # ── 客户端（Wails，Windows）────────────────────────────────────
+  # 仅探测守卫；真实 Wails 构建需 CGO(mingw)+WebView2，代码落地后启用。
   client:
     name: client (Wails build)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - id: check
+
+      - name: Detect client code
+        id: check
         shell: bash
         run: echo "exists=$([ -f client/wails.json ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-      - if: steps.check.outputs.exists == 'true'
+
+      - name: Setup Go
+        if: steps.check.outputs.exists == 'true'
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-      - if: steps.check.outputs.exists == 'true'
+
+      - name: Setup Node
+        if: steps.check.outputs.exists == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - if: steps.check.outputs.exists == 'true'
-        run: |
-          go install github.com/wailsapp/wails/v2/cmd/wails@latest
-          cd client && wails build -nopackage
+
+      - name: Install Wails CLI
+        if: steps.check.outputs.exists == 'true'
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Build (no package)
+        if: steps.check.outputs.exists == 'true'
+        working-directory: client
+        run: wails build -nopackage
