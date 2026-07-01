@@ -17,6 +17,13 @@ Thumbs.db
 /server/**/lumen-server
 vendor/
 
+# ---- Python (ops scripts) ----
+__pycache__/
+*.py[cod]
+
+# ---- Local test artifacts (scripts/gen-test-jwt.py output: keys/JWKS) ----
+.local/
+
 # ---- Node / frontend (client/frontend + website) ----
 node_modules/
 dist/
