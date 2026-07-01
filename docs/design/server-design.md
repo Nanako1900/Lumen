@@ -991,8 +991,8 @@ func Open(ctx context.Context, dsn string) (*sql.DB, error) {
 // internal/store/channels.go（要点）
 // 固定 ULID 常量（确定性，保证幂等）。
 const (
-	seedTextChannelID  = "01J9Y0000000000000LOBBY0" // text 大厅
-	seedVoiceChannelID = "01J9Y0000000000000VOICE1" // voice 开黑1
+	seedTextChannelID  = "01HZY0000000000000000TEXT0" // text 大厅（有效 Crockford base32，26 位；与实现一致）
+	seedVoiceChannelID = "01HZY0000000000000000V01C1" // voice 开黑1（勿用 I/L/O/U——非法 base32）
 )
 
 // SeedDefaultChannels 仅当 channels 表为空时插入默认频道；ON CONFLICT 幂等。
