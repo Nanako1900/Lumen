@@ -1,0 +1,4 @@
+# SPA 回退：未命中静态文件的页面路由回退到 index.html（web-design.md §2.3 / §9.3）。
+# Cloudflare Pages 中 functions/ 路由优先级高于此静态回退，因此 /desktop/*、
+# /api/*、/auth/* 端点不会被 /* 覆盖。
+/*    /index.html    200
