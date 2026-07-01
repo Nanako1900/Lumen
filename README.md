@@ -47,8 +47,18 @@
 
 任务跟踪见仓库 [Issues](../../issues) 与 [Milestones](../../milestones)。
 
-## 本地开发（占位，待代码落地后补全）
+## 本地开发
 
-- 服务端：`cd server && go run ./cmd/lumen-server`（需 PostgreSQL 与环境变量，见 [服务端设计 §6.1](./docs/design/server-design.md)）。
-- 官网：`cd website && npm i && npm run dev`（Cloudflare Pages，需 KV/Secrets，见 [官网设计 §9](./docs/design/web-design.md)）。
-- 客户端：`cd client && wails dev`（需 Wails v2 工具链与 WebView2，见 [客户端设计](./docs/design/client-design.md)）。
+完整步骤（起服务端 / 官网 Worker、所需环境变量、集成校验）见 **[`docs/DEV.md`](./docs/DEV.md)**。速览：
+
+- **服务端**：`cd server && go run ./cmd/lumen-server`（需 PostgreSQL 与 `LUMEN_*` 环境变量；清单见 [服务端设计 §6.1](./docs/design/server-design.md#61-配置全部环境变量) 与 [`docs/DEV.md`](./docs/DEV.md#1-服务端-server)）。
+- **官网**：`cd website && npm ci && npm run build && npx wrangler pages dev dist`（Cloudflare Pages Functions；本地 Secrets 走 `website/.dev.vars`，见 [`docs/DEV.md`](./docs/DEV.md#2-官网-website)）。仅 `npm run dev` 只起前端、不含 Worker 端点。
+- **客户端**：`cd client && wails dev`（需 Wails v2 工具链与 WebView2；仅 Windows，见 [客户端设计](./docs/design/client-design.md)）。
+
+> `.env` / `.dev.vars` 已被 `.gitignore` 忽略；**勿提交任何真实密钥**。各端 `.env.example` 由对应功能分支提供；在其落地前，占位清单见 [`docs/DEV.md` 附录](./docs/DEV.md#附录-a服务端-env-占位清单)。
+
+### 运维与集成
+
+- **CI**：[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) —— server(Go 1.23) / website(Node 20) / client(Wails) 三 job；用「存在守卫」探测各端代码，骨架期为绿，代码合入后自动转真实 build/test。
+- **IdP 登记与配置对齐**：[`docs/ops/idp-setup.md`](./docs/ops/idp-setup.md)（回调、`aud=lumen-api`、scope、issuer/audience/域名/端口三方对齐矩阵）。
+- **登录链路集成校验（无客户端）**：[`docs/ops/verify-login.md`](./docs/ops/verify-login.md) + [`scripts/`](./scripts)（healthz / Bearer bootstrap / WS `auth_ok`；半自动 handoff；access_token 不进 URL 核对）。
