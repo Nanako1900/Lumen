@@ -49,25 +49,30 @@ Lumen 采用 **REST + WebSocket + WebRTC** 三层混合：
    │ HTTPS    │ HTTPS (REST)  │ WSS (信令)             │ DTLS-SRTP (UDP 媒体)
    │ (登录中介)│               │                        │
    ▼          ▼               ▼                        ▼
-┌────────────────────┐  ┌──────────────────────────┐  ┌──────────────────┐
-│ 官网 (Cloudflare)   │  │ Coolify Traefik 反代      │  │ 裸 UDP 端口映射   │
-│ example.com         │  │ (终结 TLS)                │  │ (Traefik 不转发) │
-│ - 登录中介 (PKCE→IdP)│  │ - HTTP/TCP → 明文 HTTP/WS │  └────────┬─────────┘
-│ - confidential OIDC │  └────────────┬─────────────┘           │
-│   client_secret 在  │               ▼                          │
-│   Worker 加密环境变量│  ┌──────────────────────────────────────┐│
-│ - KV: HANDOFF/SESSIONS│ │  服务端单 Go 二进制 (容器内明文监听)    ││
-│ - 持有 refresh_token │  │  REST handlers │ WS hub │ Pion SFU    ││
-└─────────┬───────────┘  │  (UDPMux 单端口) │ PostgreSQL          ││
-          │ Auth Code+PKCE└──────────────────┬───────────────────┘│
-          ▼ (aud=lumen-api)                  ▼                     ▼
+┌───────────────────┐   ┌──────────────────────────┐  ┌──────────────────┐
+│ 官网 (EdgeOne)     │   │ Coolify Traefik 反代      │  │ 裸 UDP 端口映射   │
+│ example.com        │   │ (终结 TLS)                │  │ (Traefik 不转发) │
+│ - 纯静态 SPA        │   │ - HTTP/TCP → 明文 HTTP/WS │  └────────┬─────────┘
+│   (website/dist/)  │   └────────────┬─────────────┘           │
+│ - 无 Functions      │               ▼                          │
+│ - 无 KV / 无 secret │  ┌──────────────────────────────────────┐│
+└─────────┬──────────┘  │  服务端单 Go 二进制 (容器内明文监听)    ││
+          │             │  REST │ WS hub │ Pion SFU │ 登录中介   ││
+          │ 账户中心     │  内置 broker: /desktop/* /auth/* /api  ││
+          │ 跨源 XHR     │  (UDPMux 单端口) │ PostgreSQL          ││
+          │ +credentials │  持有 client_secret + refresh_token   ││
+          │             │  (Postgres，refresh_token 加密存储)     ││
+          │             └──────────────────┬───────────────────┬┘│
+          │  Auth Code+PKCE                ▼                    ▼ │
+          ▼  (aud=lumen-api)                                      ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │   外部 IdP (OAuth2 / OIDC)  —— 签发 access_token (JWT)              │
-│   服务端仅用其 JWKS 本地验 access_token (验 iss/aud/exp)，不直连官网 │
+│   服务端用其 JWKS 本地验 access_token (验 iss/aud/exp)              │
+│   并作为 confidential client 用 client_secret 换 / 刷新 token       │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**登录中介边界（Web 中介登录）**：桌面客户端**不再**自行对 IdP 跑 PKCE，而是**经官网（Cloudflare）登录中介**取 token——官网是 confidential OIDC client，用 Authorization Code + PKCE 对 IdP 登录（`client_secret` 仅在 Cloudflare Worker 加密环境变量，绝不下发桌面），并令 `access_token` 的 `aud` 含 `lumen-api`。**Go 服务端完全不变**：仍只用 IdP 的 JWKS 本地验 `access_token`（JWT，验 `iss`/`aud`/`exp`），不感知官网中介的存在，故无需新增 CORS。详细登录契约见 [web-design.md §5](./web-design.md#5-web-中介登录桌面)。
+**登录中介边界（Web 中介登录）**：桌面客户端**不再**自行对 IdP 跑 PKCE，而是**经 Go 服务端（`chat.example.com`）内置的登录中介（broker）**取 token——**Go 服务端是唯一后端**，既是资源服务器（JWKS 本地验签，原已存在）又是 OIDC 登录中介（新增，落于 commit `82f344e`，见 `internal/broker` + `internal/secure` + store broker 表 + `cmd/lumen-server/main.go`）。服务端作为 confidential OIDC client，用 Authorization Code + PKCE 对 IdP 登录（`client_secret` 仅在服务端环境变量，绝不下发桌面），并令 `access_token` 的 `aud` 含 `lumen-api`。**服务端的 JWKS 验签路径不变**：仍只用 IdP 的 JWKS 本地验 `access_token`（JWT，验 `iss`/`aud`/`exp`）。官网 `example.com` **纯静态**（仅托管 `website/dist/` 的 React SPA，无 Pages Functions、无 KV、无 secret）；账户中心的 SPA 从 `example.com` **跨源**调用 `chat.example.com` 上的 broker，故 broker 须对 `example.com` 源开启带凭据的 CORS（见 [§2.8](#28-web-跨源与-cors-约定账户中心)）。详细登录契约见 [web-design.md §5](./web-design.md#5-web-中介登录桌面服务端-broker)。
 
 | 层 | 职责 | 协议 | 是否实时 |
 |----|------|------|----------|
@@ -94,14 +99,29 @@ Lumen 采用 **REST + WebSocket + WebRTC** 三层混合：
 | `LUMEN_OAUTH_ISSUER` | OIDC issuer URL（用于校验 `iss` 及 OIDC 发现） | `https://auth.example.com/realms/lumen` | v0 |
 | `LUMEN_OAUTH_JWKS_URL` | JWKS 端点（本地验签公钥来源） | `https://auth.example.com/.../certs` | v0 |
 | `LUMEN_OAUTH_USERINFO_URL` | userinfo 端点（资料同步；**可选**，缺省由 OIDC discovery 自 issuer 推导，仅在需覆盖时配置） | `https://auth.example.com/.../userinfo` | v0 |
-| `LUMEN_OAUTH_AUDIENCE` | 期望的 `aud` 值（验 access_token；官网 client_id 在 Worker，服务端不需要 client_id） | `lumen-api` | v0 |
+| `LUMEN_OAUTH_AUDIENCE` | 期望的 `aud` 值（验 access_token；同时用于 broker 令签发 token 的 `aud` 含此值） | `lumen-api` | v0 |
 | `LUMEN_OWNER_SUBJECTS` | owner 的 OAuth subject 列表，逗号分隔 | `sub-abc,sub-def` | v0 |
 | `LUMEN_LISTEN_ADDR` | HTTP/WS 监听地址（容器内**必须绑 `0.0.0.0`**，否则 Traefik 无法到达容器） | `0.0.0.0:8080` | v0 |
 | `LUMEN_DATABASE_URL` | PostgreSQL 连接串（DSN） | `postgres://lumen:***@lumen-db:5432/lumen?sslmode=disable` | v0 |
 | `LUMEN_PUBLIC_IP` | VPS 公网 IP（`SetNAT1To1IPs` 宣告） | `203.0.113.10` | v0 |
 | `LUMEN_WEBRTC_UDP_PORT` | WebRTC 媒体单 UDP 端口（需在 Coolify 裸映射；四处对齐） | `40000` | v0 |
 
-> 本表为**服务端** env（不变）。Web 中介登录改造后，IdP 的 issuer/client_id/scope/`client_secret` 全部移到**官网 Cloudflare Worker**（见 [web-design.md §9](./web-design.md#9-配置环境变量kvsecrets)）；服务端仍只需 `LUMEN_OAUTH_ISSUER`/`LUMEN_OAUTH_JWKS_URL`/`LUMEN_OAUTH_AUDIENCE`（`=lumen-api`）等用于 JWKS 本地验签，不感知官网中介。**桌面客户端配置**不再含 issuer/client_id/scope，改为内置 `LUMEN_WEB_BASE_URL`（默认 `https://example.com`）、`LUMEN_API_BASE_URL`、`LUMEN_WS_URL`（见 [client-design §2.1](./client-design.md#21-配置)）。客户端经官网取得的 `access_token` 与服务端必须指向**同一** issuer 与 audience。
+**broker（登录中介）env（同一 Go 二进制，Coolify 注入）**——broker 是 Go 服务端的一部分，其 IdP confidential-client 配置与资源服务器共享进程：
+
+| 环境变量 | 含义 | 示例 | 归属 |
+|----------|------|------|------|
+| `LUMEN_OAUTH_CLIENT_ID` | 官网/桌面 confidential client 的 client_id | `lumen-app` | v0 |
+| `LUMEN_OAUTH_CLIENT_SECRET` | confidential client 的 client_secret（**仅服务端**，绝不下发桌面/前端） | `***` | v0 |
+| `LUMEN_OAUTH_AUTHORIZE_URL` | IdP 授权端点（**可选**，缺省由 OIDC discovery 自 issuer 推导） | `https://auth.example.com/.../auth` | v0 |
+| `LUMEN_OAUTH_TOKEN_URL` | IdP token 端点（**可选**，discovery 推导） | `https://auth.example.com/.../token` | v0 |
+| `LUMEN_OAUTH_USERINFO_URL` | IdP userinfo 端点（**可选**，discovery 推导；与上文资料同步共用） | `https://auth.example.com/.../userinfo` | v0 |
+| `LUMEN_OAUTH_DESKTOP_REDIRECT_URI` | 桌面中介 IdP 回调（在 IdP 登记） | `https://chat.example.com/desktop/callback` | v0 |
+| `LUMEN_OAUTH_WEB_REDIRECT_URI` | 账户中心 IdP 回调（在 IdP 登记） | `https://chat.example.com/auth/callback` | v0 |
+| `LUMEN_WEB_BASE_URL` | 官网源（CORS 白名单 + 网页会话重定向目标） | `https://example.com` | v0 |
+| `LUMEN_SESSION_ENC_KEY` | 网页会话 cookie 加密/签名密钥 | `***` | v0 |
+| `LUMEN_REFRESH_ENC_KEY` | `refresh_token` 落库前的静态加密密钥（与会话密钥**分离**） | `***` | v0 |
+
+> **登录中介与资源服务器同进程**：Web 中介登录改造后，IdP 的 `client_id`/`scope`/`client_secret` 与 broker 端点全部收敛在**同一 Go 服务端**（`chat.example.com`，见 [web-design.md §5](./web-design.md#5-web-中介登录桌面服务端-broker)、[§9](./web-design.md#9-配置环境变量secrets)），**不再**存在独立的官网 Worker/KV。资源服务器路径仍只需 `LUMEN_OAUTH_ISSUER`/`LUMEN_OAUTH_JWKS_URL`/`LUMEN_OAUTH_AUDIENCE`（`=lumen-api`）做 JWKS 本地验签；broker 路径额外用上表 client 配置换/刷新 token。`client_secret` 与 `refresh_token` **仅在服务端**（`refresh_token` 以 `LUMEN_REFRESH_ENC_KEY` 静态加密后存 Postgres）。**桌面客户端配置**不含 issuer/client_id/scope，改为内置 `LUMEN_WEB_BASE_URL`（登录中介基址，默认 `https://chat.example.com`）、`LUMEN_API_BASE_URL`、`LUMEN_WS_URL`（见 [client-design §2.1](./client-design.md#21-配置)）。客户端经 broker 取得的 `access_token` 与资源服务器必须指向**同一** issuer 与 audience。
 
 ---
 
@@ -116,24 +136,26 @@ Lumen 采用 **REST + WebSocket + WebRTC** 三层混合：
 
 ### 2.2 客户端取 token（Web 中介登录，回环 handoff）
 
-> 桌面客户端**不再**自行对 IdP 跑 PKCE，而是**委托官网（Cloudflare）登录中介**取 token。服务端不参与登录中介；本段仅列契约要点以便桌面/官网对齐。**完整登录契约（官网 Worker 端点、KV、安全红线）见 [web-design.md §5](./web-design.md#5-web-中介登录桌面)**。
+> 桌面客户端**不再**自行对 IdP 跑 PKCE，而是**委托 Go 服务端内置的登录中介（broker）**取 token。broker 与资源服务器是**同一 Go 二进制**（`chat.example.com`），本段仅列契约要点以便桌面/服务端对齐。**完整登录契约（broker 端点、broker 表、安全红线）见 [web-design.md §5](./web-design.md#5-web-中介登录桌面服务端-broker)**。
 
 **模型变更要点**：
-- 官网是 **confidential OIDC client**，用 Authorization Code + PKCE 对 IdP 登录；请求 scope `openid profile email offline_access`，并令 `access_token` 的 `aud` 含 `lumen-api`（= 服务端 `LUMEN_OAUTH_AUDIENCE`）。`client_secret` 仅在 Cloudflare Worker 加密环境变量，**绝不下发桌面**。
-- **`refresh_token` 永不落到桌面**：存于官网 KV（SESSIONS）；桌面只持有不透明高熵 `desktop_session_id`（存 Windows 凭据库 DPAPI），`access_token` 仅在内存。
-- 桌面不再内置 IdP issuer/client_id/scope，仅内置 `LUMEN_WEB_BASE_URL`（默认 `https://example.com`）等（见 [§1.3](#13-全局配置项环境变量coolify-注入) 备注与 client-design §2.1）。
+- Go 服务端是 **confidential OIDC client**，用 Authorization Code + PKCE 对 IdP 登录；请求 scope `openid profile email offline_access`，并令 `access_token` 的 `aud` 含 `lumen-api`（= `LUMEN_OAUTH_AUDIENCE`）。`client_secret` 仅在服务端环境变量（`LUMEN_OAUTH_CLIENT_SECRET`），**绝不下发桌面**。
+- **`refresh_token` 永不落到桌面**：存于服务端 **Postgres**（broker 表，以 `LUMEN_REFRESH_ENC_KEY` **静态加密**）；桌面只持有不透明高熵 `desktop_session_id`（存 Windows 凭据库 DPAPI），`access_token` 仅在内存。
+- 桌面不再内置 IdP issuer/client_id/scope，仅内置 `LUMEN_WEB_BASE_URL`（登录中介基址，默认 `https://chat.example.com`）等（见 [§1.3](#13-全局配置项环境变量coolify-注入) 备注与 client-design §2.1）。
 
-**官网中介端点**（均在 `example.com`，详见 [web-design.md §5](./web-design.md#5-web-中介登录桌面)）：
+**broker 端点**（均在 Go 服务端 `chat.example.com`，详见 [web-design.md §5](./web-design.md#5-web-中介登录桌面服务端-broker)）：
 - `GET /desktop/login?redirect_uri=<loopback>&state=<s>&challenge=<S256(handoff_verifier)>` —— 校验 `redirect_uri` 为 `http://127.0.0.1:<port>/...` 回环，暂存上下文后 302 到 IdP 授权端点（Auth Code+PKCE，带 `aud=lumen-api`）。
-- `GET /desktop/callback?code=&state=` —— Worker 用 `client_secret` 向 IdP 换 token（access+refresh+id），生成一次性 `handoff_code` 写 KV（绑 `bound_challenge`，TTL≈120s），302 回 `redirect_uri?handoff_code=&state=`。**`access_token` 绝不进 URL**。
-- `POST /api/desktop/exchange {handoff_code, handoff_verifier}` —— 校验 `S256(handoff_verifier)==bound_challenge`，一次性消费 `handoff_code`，生成 `desktop_session_id` 并写 KV SESSIONS，返回 `{access_token, expires_in, desktop_session_id, profile:{display_name, avatar_url}}`。
+- `GET /desktop/callback?code=&state=` —— 服务端用 `client_secret` 向 IdP 换 token（access+refresh+id），生成一次性 `handoff_code` 写 broker 表（绑 `bound_challenge`，TTL≈120s），302 回 `redirect_uri?handoff_code=&state=`。**`access_token` 绝不进 URL**。
+- `POST /api/desktop/exchange {handoff_code, handoff_verifier}` —— 校验 `S256(handoff_verifier)==bound_challenge`，一次性消费 `handoff_code`，生成 `desktop_session_id` 并把加密 `refresh_token` 写 broker 会话表，返回 `{access_token, expires_in, desktop_session_id, profile:{display_name, avatar_url}}`。
+
+> **桌面 handoff 线契约逐字节保留**：`/desktop/login`、`/desktop/callback`、`/api/desktop/exchange`、`/api/desktop/refresh`、`/api/desktop/logout` 的请求/响应体形状与字段**与原契约一字不差**——**仅 host 由 `example.com` 改为 `chat.example.com`**。未来 Windows 客户端的唯一改动是**基址 base URL**（`LUMEN_WEB_BASE_URL`）。
 
 **桌面侧时序要点（回环 handoff）**：
-1. 桌面起 `127.0.0.1:<rand>` 回环监听，生成 `handoff_verifier` + `state`，系统浏览器打开 `example.com/desktop/login?redirect_uri=http://127.0.0.1:<port>/cb&state&challenge=S256(handoff_verifier)`。
-2. 官网完成 OIDC 后 302 回 `http://127.0.0.1:<port>/cb?handoff_code&state`。
-3. 桌面校验 `state` → `POST example.com/api/desktop/exchange {handoff_code, handoff_verifier}` → 得 `{access_token, expires_in, desktop_session_id, profile}`。
+1. 桌面起 `127.0.0.1:<rand>` 回环监听，生成 `handoff_verifier` + `state`，系统浏览器打开 `chat.example.com/desktop/login?redirect_uri=http://127.0.0.1:<port>/cb&state&challenge=S256(handoff_verifier)`。
+2. 服务端 broker 完成 OIDC 后 302 回 `http://127.0.0.1:<port>/cb?handoff_code&state`。
+3. 桌面校验 `state` → `POST chat.example.com/api/desktop/exchange {handoff_code, handoff_verifier}` → 得 `{access_token, expires_in, desktop_session_id, profile}`。
 4. 桌面把 `desktop_session_id` 存入 Windows 凭据库（DPAPI），`access_token` 仅内存。
-5. `access_token` 用于：REST 的 `Authorization: Bearer`，以及 WS 首帧 `auth`（与原契约一致，服务端无感）。
+5. `access_token` 用于：REST 的 `Authorization: Bearer`，以及 WS 首帧 `auth`（与原契约一致，资源服务器无感）。
 
 ### 2.3 服务端验签（JWKS 本地验签）
 
@@ -151,7 +173,7 @@ Lumen 采用 **REST + WebSocket + WebRTC** 三层混合：
 
 > **首登幂等 upsert（消除竞态）**：REST 与 WS **两条通道**在首次见到某 `sub` 时都会**幂等 upsert** `users` 行——成员级 REST 入口（`bootstrap`/`me`）在验签后即用 claims（必要时 userinfo 补齐）`UpsertUser`，WS `auth` 同样如此。这保证新用户首次登录时，无论 REST 先到还是 WS 先到，都不会出现“用户行不存在”的 `NOT_FOUND`。**区别**：只有 WS（`auth`/`reauth`）在检测到资料变化时广播 `user_updated`；REST 的 upsert **不广播**（避免重复/竞态）。
 
-> **Web 中介登录不影响服务端验签**：`access_token` 仍是 **IdP 签发的 JWT**（`aud=lumen-api`），无论它由桌面直连 IdP 取得还是经官网中介（[§2.2](#22-客户端取-tokenweb-中介登录回环-handoff)）取得，服务端的验签路径、claims 读取与 upsert 逻辑**完全不变**——服务端只认 IdP 的 JWKS 与 token 内的 `iss`/`aud`/`exp` 及 `name`/`picture` claims，不感知 token 的获取方式。
+> **Web 中介登录不影响资源服务器验签**：`access_token` 仍是 **IdP 签发的 JWT**（`aud=lumen-api`），无论它由桌面直连 IdP 取得还是经服务端 broker（[§2.2](#22-客户端取-tokenweb-中介登录回环-handoff)）取得，资源服务器的验签路径、claims 读取与 upsert 逻辑**完全不变**——资源服务器只认 IdP 的 JWKS 与 token 内的 `iss`/`aud`/`exp` 及 `name`/`picture` claims，不感知 token 的获取方式。虽然 broker 与资源服务器在同一进程，二者仍是**逻辑解耦**的两条路径：broker 负责登录/换刷 token（confidential client），资源服务器负责 Bearer 校验（JWKS）。
 
 ### 2.4 鉴权在两个通道的应用
 
@@ -192,16 +214,16 @@ Lumen 采用 **REST + WebSocket + WebRTC** 三层混合：
 
 > **版本归属**：主动 `reauth`（同一连接热更新 token，不重连）整体为 **[v1]**。**[v0]** 下 access_token 过期一律**等价断线**——由客户端重新取 token 并**重连 + 重发 `auth`** 处理，不实现热 `reauth` 与 WS 期间的 `TOKEN_EXPIRED` 中途路径。
 
-1. **桌面主动刷新（经官网中介）**：桌面在 `access_token` 临近过期时，向**官网中介**请求新 token——`POST https://example.com/api/desktop/refresh {desktop_session_id}`（详见 [web-design.md §5](./web-design.md#5-web-中介登录桌面)）。官网用 `client_secret` + KV 内的 `refresh_token` 向 IdP `grant_type=refresh_token`（IdP 轮换则官网更新 KV），返回 `{access_token, expires_in}`。**桌面不再直连 IdP，也不再持有 `refresh_token`**（`refresh_token` 永远只在官网 KV）。刷新后：
+1. **桌面主动刷新（经服务端 broker）**：桌面在 `access_token` 临近过期时，向**服务端 broker** 请求新 token——`POST https://chat.example.com/api/desktop/refresh {desktop_session_id}`（详见 [web-design.md §5](./web-design.md#5-web-中介登录桌面服务端-broker)）。broker 用 `client_secret` + broker 表内**解密后**的 `refresh_token` 向 IdP `grant_type=refresh_token`（IdP 轮换则 broker 更新会话表内加密 `refresh_token`），返回 `{access_token, expires_in}`。**桌面不再直连 IdP，也不再持有 `refresh_token`**（`refresh_token` 永远只在服务端 Postgres，加密存储）。刷新后：
    - REST：后续请求带新 `access_token`。
    - WS **[v1]**：发送 `{"type":"reauth","data":{"access_token":"<new>"}}` 在**同一连接**上更新会话绑定的 token，**无需重连**。服务端重新验签并回 `auth_ok`（复用同一 `type`，`data.reauth=true`）。WS reauth 仍整体为 **[v1]**，用的是刷新后的新 `access_token`，归属不变。**[v0]**：不发 `reauth`；token 过期即按断线重连（重发 `auth`）处理。
-   - 资料同步：刷新后的新 `access_token` claims 即承载最新资料（见 [§2.7](#27-资料双向同步)）；桌面 UI 资料以官网 `/exchange`/`/refresh` 返回为准。
+   - 资料同步：刷新后的新 `access_token` claims 即承载最新资料（见 [§2.7](#27-资料双向同步)）；桌面 UI 资料以 broker `/exchange`/`/refresh` 返回为准。
 
-2. **REST 收到 401（token 过期）**：桌面应先向官网中介刷新（`/api/desktop/refresh`）后重试**一次**；若官网返回 `401`（错误信封 `code=SESSION_INVALID`，即 `desktop_session_id` 不存在/失效），桌面据此**转重新登录**（重走 [§2.2](#22-客户端取-tokenweb-中介登录回环-handoff) 的 Web 中介登录）。
+2. **REST 收到 401（token 过期）**：桌面应先向 broker 刷新（`/api/desktop/refresh`）后重试**一次**；若 broker 返回 `401`（错误信封 `code=SESSION_INVALID`，即 `desktop_session_id` 不存在/失效），桌面据此**转重新登录**（重走 [§2.2](#22-客户端取-tokenweb-中介登录回环-handoff) 的 Web 中介登录）。
 
-3. **WS 期间 token 过期 [v1]**：服务端在校验某帧需要的资源时若发现绑定 token 已过期，回 `error`（`code=TOKEN_EXPIRED`）但**不立即断开**，给客户端发送 `reauth` 的机会；客户端应在收到 `TOKEN_EXPIRED` 后立即向官网中介刷新并 `reauth`（用刷新后的新 `access_token`）。若 30s 内未收到合法 `reauth`，服务端关闭连接。**[v0]**：不实现该中途路径，token 过期直接关闭连接，由客户端重连。
+3. **WS 期间 token 过期 [v1]**：服务端在校验某帧需要的资源时若发现绑定 token 已过期，回 `error`（`code=TOKEN_EXPIRED`）但**不立即断开**，给客户端发送 `reauth` 的机会；客户端应在收到 `TOKEN_EXPIRED` 后立即向 broker 刷新并 `reauth`（用刷新后的新 `access_token`）。若 30s 内未收到合法 `reauth`，服务端关闭连接。**[v0]**：不实现该中途路径，token 过期直接关闭连接，由客户端重连。
 
-> 服务端与桌面**均不**持有 refresh_token、均不直连 IdP 刷新；`refresh_token` 生命周期完全收敛在**官网 Cloudflare**（KV SESSIONS）。桌面侧的「刷新」即调官网 `/api/desktop/refresh`；`desktop_session_id` 失效（`SESSION_INVALID`）即转重新登录。登出经 `POST https://example.com/api/desktop/logout {desktop_session_id}`（删 SESSIONS）后清桌面凭据库、关 WS、重置 store。
+> 桌面**不**持有 refresh_token、**不**直连 IdP 刷新；`refresh_token` 生命周期完全收敛在**服务端 Postgres**（broker 会话表，`LUMEN_REFRESH_ENC_KEY` 静态加密）。桌面侧的「刷新」即调 broker `/api/desktop/refresh`；`desktop_session_id` 失效（`SESSION_INVALID`）即转重新登录。登出经 `POST https://chat.example.com/api/desktop/logout {desktop_session_id}`（删 broker 会话行）后清桌面凭据库、关 WS、重置 store。
 
 ### 2.7 资料双向同步
 
@@ -211,8 +233,8 @@ Lumen 采用 **REST + WebSocket + WebRTC** 三层混合：
 
 | 触发点 | 谁执行 | 动作 |
 |--------|--------|------|
-| 每次登录后 | 桌面经官网 `/exchange` 取最新 token（及 `profile`）→ WS `auth` 携带该 token | 服务端验签时从 claims 取 `name`/`preferred_username`/`picture` |
-| 每次刷新 token 后 | 桌面经官网 `/refresh` 取新 token → WS `reauth` | 同上 |
+| 每次登录后 | 桌面经 broker `/exchange` 取最新 token（及 `profile`）→ WS `auth` 携带该 token | 服务端验签时从 claims 取 `name`/`preferred_username`/`picture` |
+| 每次刷新 token 后 | 桌面经 broker `/refresh` 取新 token → WS `reauth` | 同上 |
 | 服务端首帧/`reauth` 处理 | 服务端 | 对比 DB 现值，**命中既有行且实际有变化（changed）才 upsert 改值** 并向在线成员广播 `user_updated` |
 
 > **`changed` 语义（统一定义）**：`changed` 仅指 **`ON CONFLICT DO UPDATE` 命中既有行，且 `display_name` 或 `avatar_url` 实际发生变化**。**首次 `INSERT`（新用户首登）不算 `changed`，不广播 `user_updated`**——新成员的可见性由 REST `members`/`bootstrap` 与（其加入语音时的）`user_joined` 用户快照负责。`user_updated` 整体为 **[v1]**；[v0] 下各端仅由 `auth_ok.user` / `bootstrap.members` 初始化资料，不实现 `user_updated` 消费分支。
@@ -221,7 +243,28 @@ Lumen 采用 **REST + WebSocket + WebRTC** 三层混合：
 - `display_name` ← claims 的 `name`，缺失则回退 `preferred_username`，再缺失回退 `sub`。
 - `avatar_url` ← claims 的 `picture`（直接使用 OIDC picture URL，**不做本地头像存储**）。
 
-> 服务端优先用 `access_token` 内的 claims（若已含 `name`/`picture`）；若 JWT 不含这些 claim，则服务端调 userinfo（端点由 OIDC discovery 自 issuer 推导，或用可选的 `LUMEN_OAUTH_USERINFO_URL` 覆盖）补齐。**这条服务端验签 + 资料同步路径不因 Web 中介登录而改变**：`access_token` 仍是 IdP 签发的 JWT、claims 仍含 `name`/`picture`，服务端不感知 token 由官网中介获取。桌面本地 UI 的头像/昵称由官网 `/exchange`/`/refresh` 返回的 `profile` 提供（不再桌面直拉 userinfo），二者仍以服务端 DB 为准（DB 变化才广播 `user_updated`）。
+> 服务端优先用 `access_token` 内的 claims（若已含 `name`/`picture`）；若 JWT 不含这些 claim，则服务端调 userinfo（端点由 OIDC discovery 自 issuer 推导，或用可选的 `LUMEN_OAUTH_USERINFO_URL` 覆盖）补齐。**这条资源服务器验签 + 资料同步路径不因 Web 中介登录而改变**：`access_token` 仍是 IdP 签发的 JWT、claims 仍含 `name`/`picture`，验签路径不感知 token 由 broker 获取。桌面本地 UI 的头像/昵称由 broker `/exchange`/`/refresh` 返回的 `profile` 提供（不再桌面直拉 userinfo），二者仍以服务端 DB 为准（DB 变化才广播 `user_updated`）。
+
+### 2.8 Web 跨源与 CORS 约定（账户中心）
+
+> **架构前提**：官网 `example.com` 是**纯静态 SPA**（EdgeOne Pages 仅托管 `website/dist/`，无 Pages Functions、无 KV、无 secret）。账户中心的登录/资料/登出全部由 **Go 服务端 broker**（`chat.example.com`）提供。因此 SPA 从 `example.com` 调 broker 是**跨源（cross-origin）**——这与旧「官网 Worker 同源」模型相反，是**必须新增 CORS**的关键改动。
+
+`example.com` 与 `chat.example.com` 是**同站（same-site，同一可注册域 `example.com`）**、但**跨源（cross-origin，host 不同）**。据此定义网页会话与 broker CORS 契约：
+
+- **会话 cookie 属性**（broker 在 `/auth/callback` 下发的网页会话 cookie，以及 `/api/me`、`/auth/logout` 读取）：
+  - `SameSite=Lax`：同站顶层导航（`/auth/login`、`/auth/callback` 均为浏览器**顶层导航**，非 XHR）可带 cookie；同站跨源 XHR 由下方 CORS+credentials 补足。
+  - `HttpOnly`：前端 JS 不可读。
+  - `Secure`：仅 HTTPS。
+  - `Path=/`。
+  - **host-only（不设 `Domain` 属性）**：cookie 绑定到 `chat.example.com` 单一 host，不泛化到 `example.com` 或其它子域，缩小暴露面。
+- **broker CORS**（仅对账户中心相关端点 `/api/me`、`/auth/logout` 等被 SPA 以 XHR 调用者）：
+  - `Access-Control-Allow-Origin`：**精确回显** `LUMEN_WEB_BASE_URL`（`https://example.com`）这一个源，**不用** `*`（带凭据时 `*` 非法）。
+  - `Access-Control-Allow-Credentials: true`。
+  - 按需回 `Access-Control-Allow-Methods` / `Access-Control-Allow-Headers`，并正确处理 `OPTIONS` 预检。
+- **SPA 侧**：对 broker 的 XHR 一律 `credentials: 'include'`（携带/接收 host-only 会话 cookie）；`/auth/login` 与 `/auth/callback` 走**顶层导航**（`window.location` 跳转），不是 XHR，故不受 CORS 预检限制、且能设置/携带 `SameSite=Lax` cookie。
+- **资源服务器（Bearer `/api/v1/*`、WSS `/ws`）不受此约定影响**：账户中心**不调用** Lumen 资源 API；桌面客户端用**原生 HTTP/WS**（非浏览器同源策略约束）连资源服务器。CORS 仅为**浏览器 SPA → broker** 而设。
+
+> **对比旧模型**：旧设计中账户中心端点与 SPA 同在 `example.com`（Cloudflare Pages Functions），属**同源**，故声称「无需 CORS」。新架构把 broker 移到 `chat.example.com`，账户中心变为**跨源**，因此**必须**配置上述 CORS + 带凭据 cookie。此断言在旧文档中为「同源/无 CORS」，现更正为「跨源 + CORS + credentials + host-only Lax cookie」。
 
 ---
 

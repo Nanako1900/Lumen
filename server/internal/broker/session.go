@@ -10,7 +10,7 @@ import (
 
 // Account-center cookies (decision 1). Both are host-only (NO Domain attribute),
 // HttpOnly + Secure + SameSite=Lax + Path=/, sealed with AES-256-GCM under
-// LUMEN_SESSION_ENC_KEY (mirrors website/functions/_lib/session.ts).
+// LUMEN_SESSION_ENC_KEY.
 const (
 	// sessionCookie holds the account-center web session (sub + profile).
 	sessionCookie = "lumen_session"

@@ -20,9 +20,8 @@ const (
 	webScope     = "openid profile email"
 )
 
-// Handler serves the account-center + desktop broker endpoints (decision 10),
-// the Go port of the EdgeOne Pages Functions. It is immutable after
-// construction and safe for concurrent use.
+// Handler serves the account-center + desktop broker endpoints (decision 10) on
+// the Go server. It is immutable after construction and safe for concurrent use.
 type Handler struct {
 	cfg    config.Config
 	store  store.Store

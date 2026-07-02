@@ -3,16 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Lumen 官网 + 桌面 Web 中介登录（React + Vite + Tailwind + 腾讯 EdgeOne Pages Functions）",
+  "description": "Lumen 官网（静态 SPA：React + Vite + Tailwind；EdgeOne Pages 仅静态托管 dist/，后端在 Go 中介 chat.example.com）",
   "scripts": {
     "dev": "vite",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.functions.json && tsc --noEmit -p tsconfig.node.json",
-    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "edgeone:dev": "echo 'Local dev for EdgeOne Pages Functions: use the EdgeOne CLI or EdgeOne 控制台 to run functions/ + serve dist/. # EDGEONE-VERIFY: 以 EdgeOne 官方 CLI/控制台的本地开发命令为准'"
+    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -28,7 +24,6 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.15",
     "typescript": "^5.6.3",
-    "vite": "^5.4.11",
-    "vitest": "^2.1.8"
+    "vite": "^5.4.11"
   }
 }

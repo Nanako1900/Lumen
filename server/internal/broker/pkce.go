@@ -1,14 +1,13 @@
-// Package broker is the Go port of the EdgeOne Pages Functions that implement
-// the account-center OIDC login and the desktop login broker (web-design.md §5,
-// §6). It runs in parallel with the still-live TypeScript functions and mirrors
-// their behavior 1:1, backed by the config, store and secure packages from
-// stage A.
+// Package broker implements the account-center OIDC login and the desktop login
+// broker (web-design.md §5, §6) on the Go server (chat.example.com) — the single
+// backend. It was ported from the original EdgeOne Pages Functions, which have
+// since been removed; inline "mirrors *.ts" notes reference that original
+// TypeScript source for provenance only. Backed by the config, store and secure
+// packages.
 //
-// This file mirrors website/functions/_lib/pkce.ts. The heavy lifting (entropy,
-// base64url, S256, constant-time compare) lives in the shared secure package so
-// the Go server and the TS functions stay byte-identical; the aliases below give
-// the broker the same vocabulary as the reference TS without re-implementing the
-// primitives.
+// The heavy lifting (entropy, base64url, S256, constant-time compare) lives in
+// the shared secure package; the aliases below give the broker a compact
+// vocabulary without re-implementing the primitives.
 package broker
 
 import "lumen/internal/secure"

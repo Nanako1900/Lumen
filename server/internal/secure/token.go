@@ -1,12 +1,8 @@
 // Package secure holds the shared cryptographic primitives for the account
-// center / desktop broker flow (web-design.md §5.5, §6.2, §8). It mirrors the
-// EdgeOne functions library 1:1 so the Go server and the TypeScript Pages
-// Functions stay behaviorally identical while both run in parallel:
-//
-//	website/functions/_lib/pkce.ts   -> Base64URLEncode / Base64URLDecode /
-//	                                    IsBase64URL / RandomToken / S256 /
-//	                                    ConstantTimeEqualString
-//	website/functions/_lib/session.ts -> Seal / Open (AES-256-GCM cookies)
+// center / desktop broker flow (web-design.md §5.5, §6.2, §8): base64url
+// encode/decode, IsBase64URL, RandomToken, S256, ConstantTimeEqualString, and
+// the AES-256-GCM Sealer used for the sealed cookies and refresh_token-at-rest.
+// (Ported from the original EdgeOne functions crypto helpers, now removed.)
 //
 // Entropy comes from crypto/rand only (never math/rand). All encodings use
 // base64url without padding (RFC 7636).

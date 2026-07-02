@@ -2,8 +2,8 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 // Vite builds only the React SPA under src/ into dist/.
-// EdgeOne Pages deploys dist/ statically and functions/ as Pages Functions
-// (file-based routing) — functions/ is NOT bundled by Vite.
+// EdgeOne Pages serves dist/ statically (STATIC-ONLY: no Pages Functions, no KV).
+// All backend/auth lives on the Go broker at chat.example.com (cross-origin).
 export default defineConfig({
   plugins: [react()],
   build: {

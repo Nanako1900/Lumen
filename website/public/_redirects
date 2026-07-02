@@ -1,7 +1,8 @@
-# SPA 深链回退（额外兜底）。web-design.md §2.3 / §9.3。
+# SPA 深链回退（额外兜底）。EdgeOne Pages 仅静态托管 dist/，无函数路由。
 # 主用机制：edgeone.json 的 rewrites —— 对 /download /account /help /privacy /terms /about
-# 逐条「精确」回退到 /index.html（不含通配，绝不遮蔽 /api/* /auth/* /desktop/* 函数路由）。
+# 逐条「精确」回退到 /index.html。
 # 本 _redirects 的 /* 通配为额外兜底：若 EdgeOne 沿用 _redirects 约定，则覆盖未列出的未知路径；
 # 若不沿用则被忽略，不影响 edgeone.json 里的精确 rewrites。
-# 部署后核对：直达 /account 刷新应加载 SPA；同时 /auth/login、/api/me 等函数路由仍正常。
+# 后端（账户中心/认证）已迁至 Go 中介 chat.example.com，SPA 跨域直连。
+# 部署后核对：直达 /account 刷新应加载 SPA。
 /*    /index.html    200
