@@ -32,5 +32,11 @@ RUN mkdir -p /app/updates && chown -R app:app /app
 EXPOSE 8080
 EXPOSE 40000/udp
 
+# 健康检查：命中公开的 /api/v1/healthz（无需鉴权，静态返回 {"success":true,"data":{"status":"ok"}}，
+# 不依赖 DB，故不会因 DB 抖动误判）。Coolify 据此判断容器就绪并消除“未配置健康检查”提示。
+# alpine 自带 busybox wget。注意：健康检查与 TLS 证书签发无关——证书由 Traefik/ACME 负责。
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -q -O - http://127.0.0.1:8080/api/v1/healthz >/dev/null 2>&1 || exit 1
+
 USER app
 ENTRYPOINT ["/app/lumen-server"]
