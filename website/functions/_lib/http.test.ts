@@ -27,7 +27,7 @@ describe("json / jsonError", () => {
   it("badRequest and notFound use expected codes/status", async () => {
     const br = badRequest("bad");
     expect(br.status).toBe(400);
-    expect((await br.json<{ error: { code: string } }>()).error.code).toBe("BAD_REQUEST");
+    expect(((await br.json()) as { error: { code: string } }).error.code).toBe("BAD_REQUEST");
     const nf = notFound();
     expect(nf.status).toBe(404);
   });

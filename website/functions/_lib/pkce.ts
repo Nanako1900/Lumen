@@ -10,14 +10,14 @@ export function base64urlEncode(bytes: Uint8Array): string {
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]!);
   }
-  // btoa 在 Workers 运行时可用
+  // btoa 为 Web 标准全局，在边缘运行时（EdgeOne Pages Functions）与 Node 20 均可用
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 /**
  * 将任意 Uint8Array 复制为 ArrayBuffer 背衬的视图，供 Web Crypto API 使用。
- * 规避 workers-types 中 ArrayBufferLike（含 SharedArrayBuffer）与 BufferSource
- * 的类型不兼容；同时避免把可能共享的底层缓冲区直接传入 crypto。
+ * 规避 ArrayBufferLike（含 SharedArrayBuffer）与 BufferSource 的类型不兼容；
+ * 同时避免把可能共享的底层缓冲区直接传入 crypto。
  */
 export function toBytes(view: Uint8Array): Uint8Array<ArrayBuffer> {
   const copy = new Uint8Array(view.length);

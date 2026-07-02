@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { env } from "cloudflare:test";
 import {
   sealSession,
   openSession,
@@ -9,9 +8,9 @@ import {
   defaultSessionExp,
   SESSION_COOKIE,
 } from "./session";
-import type { Env } from "./env";
+import { makeEnv } from "./testutil";
 
-const testEnv = env as unknown as Env;
+const testEnv = makeEnv();
 
 describe("web session cookie (AES-GCM)", () => {
   it("round-trips a sealed session", async () => {

@@ -6,6 +6,7 @@
  * 账户中心不调 Lumen API）。
  */
 import type { Env } from "../_lib/env";
+import type { PagesFunction } from "../_lib/runtime";
 import { buildAuthorizeUrl } from "../_lib/oidc";
 import { randomToken, s256 } from "../_lib/pkce";
 import {

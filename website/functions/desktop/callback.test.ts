@@ -1,5 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { env } from "cloudflare:test";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { onRequestGet } from "./callback";
 import {
   makeContext,
@@ -7,12 +6,16 @@ import {
   idpTokenRoute,
   idpUserinfoRoute,
   fakeJwt,
+  makeEnv,
 } from "../_lib/testutil";
-import { putLoginContext, type HandoffRecord } from "../_lib/kv";
+import { putLoginContext, consumeHandoff } from "../_lib/kv";
 import { s256 } from "../_lib/pkce";
 import type { Env } from "../_lib/env";
 
-const testEnv = env as unknown as Env;
+let testEnv: Env;
+beforeEach(() => {
+  testEnv = makeEnv(); // 每个用例新建内存 KV，保证隔离
+});
 
 let restoreFetch: (() => void) | null = null;
 afterEach(() => {
@@ -66,16 +69,15 @@ describe("GET /desktop/callback", () => {
     expect(loc.toString()).not.toContain("access_token");
     expect(loc.searchParams.has("access_token")).toBe(false);
 
-    // HANDOFF written, bound to the desktop challenge
-    const raw = await testEnv.HANDOFF.get(handoffCode);
-    expect(raw).toBeTruthy();
-    const rec = JSON.parse(raw!) as HandoffRecord;
-    expect(rec.bound_challenge).toBe(challenge);
-    expect(rec.refresh_token).toBe("refresh-abc");
-    expect(rec.sub).toBe("user-1");
-    expect(rec.expires_in).toBe(3600);
-    expect(rec.profile.display_name).toBe("Alice");
-    expect(rec.profile.avatar_url).toBe("https://img/a.png");
+    // HANDOFF written, bound to the desktop challenge（经真实读路径解封内嵌信封）
+    const rec = await consumeHandoff(testEnv, handoffCode);
+    expect(rec).not.toBeNull();
+    expect(rec!.bound_challenge).toBe(challenge);
+    expect(rec!.refresh_token).toBe("refresh-abc");
+    expect(rec!.sub).toBe("user-1");
+    expect(rec!.expires_in).toBe(3600);
+    expect(rec!.profile.display_name).toBe("Alice");
+    expect(rec!.profile.avatar_url).toBe("https://img/a.png");
 
     // login context consumed (one-time)
     expect(await testEnv.HANDOFF.get(`ctx:${oidcState}`)).toBeNull();
@@ -103,9 +105,9 @@ describe("GET /desktop/callback", () => {
       makeContext(callbackRequest({ code: "code-2", state: oidcState }), testEnv),
     );
     const handoffCode = new URL(res.headers.get("location")!).searchParams.get("handoff_code")!;
-    const rec = JSON.parse((await testEnv.HANDOFF.get(handoffCode))!) as HandoffRecord;
-    expect(rec.profile.display_name).toBe("bob");
-    expect(rec.profile.avatar_url).toBe("https://img/b.png");
+    const rec = await consumeHandoff(testEnv, handoffCode);
+    expect(rec!.profile.display_name).toBe("bob");
+    expect(rec!.profile.avatar_url).toBe("https://img/b.png");
   });
 
   it("302s back to loopback with error when IdP token exchange fails", async () => {

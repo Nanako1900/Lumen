@@ -1,4 +1,6 @@
 # SPA 回退：未命中静态文件的页面路由回退到 index.html（web-design.md §2.3 / §9.3）。
-# Cloudflare Pages 中 functions/ 路由优先级高于此静态回退，因此 /desktop/*、
-# /api/*、/auth/* 端点不会被 /* 覆盖。
+# functions/ 端点路由优先级应高于此静态回退，因此 /desktop/*、/api/*、/auth/*
+# 端点不会被 /* 覆盖。
+# EDGEONE-VERIFY: EdgeOne Pages 的 SPA 回退/重写配置格式（是否沿用 _redirects）
+# 与 Functions 相对静态回退的优先级，以 EdgeOne 官方文档为准。
 /*    /index.html    200

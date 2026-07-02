@@ -1,12 +1,14 @@
-import { describe, it, expect } from "vitest";
-import { env } from "cloudflare:test";
+import { describe, it, expect, beforeEach } from "vitest";
 import { onRequestPost } from "./exchange";
-import { makeContext, jsonPost, fakeJwt } from "../../_lib/testutil";
+import { makeContext, jsonPost, fakeJwt, makeEnv } from "../../_lib/testutil";
 import { putHandoff, getSession, type HandoffRecord } from "../../_lib/kv";
 import { s256, randomToken } from "../../_lib/pkce";
 import type { Env } from "../../_lib/env";
 
-const testEnv = env as unknown as Env;
+let testEnv: Env;
+beforeEach(() => {
+  testEnv = makeEnv(); // 每个用例新建内存 KV，保证隔离
+});
 const URL_EXCHANGE = "https://test.example/api/desktop/exchange";
 
 async function seedHandoff(overrides?: Partial<HandoffRecord>): Promise<{
@@ -36,12 +38,12 @@ describe("POST /api/desktop/exchange", () => {
       makeContext(jsonPost(URL_EXCHANGE, { handoff_code: handoffCode, handoff_verifier: verifier }), testEnv),
     );
     expect(res.status).toBe(200);
-    const body = await res.json<{
+    const body = (await res.json()) as {
       access_token: string;
       expires_in: number;
       desktop_session_id: string;
       profile: { display_name: string; avatar_url: string };
-    }>();
+    };
     expect(body.access_token).toBeTruthy();
     expect(body.expires_in).toBe(3600);
     expect(body.desktop_session_id.length).toBeGreaterThan(40);
@@ -50,12 +52,12 @@ describe("POST /api/desktop/exchange", () => {
     expect(JSON.stringify(body)).not.toContain("refresh-token-1");
   });
 
-  it("writes SESSIONS with refresh_token + sub (refresh_token stays in Cloudflare)", async () => {
+  it("writes SESSIONS with refresh_token + sub (refresh_token stays server-side in KV)", async () => {
     const { handoffCode, verifier } = await seedHandoff();
     const res = await onRequestPost(
       makeContext(jsonPost(URL_EXCHANGE, { handoff_code: handoffCode, handoff_verifier: verifier }), testEnv),
     );
-    const body = await res.json<{ desktop_session_id: string }>();
+    const body = (await res.json()) as { desktop_session_id: string };
     const session = await getSession(testEnv, body.desktop_session_id);
     expect(session).not.toBeNull();
     expect(session!.refresh_token).toBe("refresh-token-1");
@@ -73,7 +75,7 @@ describe("POST /api/desktop/exchange", () => {
       makeContext(jsonPost(URL_EXCHANGE, { handoff_code: handoffCode, handoff_verifier: verifier }), testEnv),
     );
     expect(second.status).toBe(404);
-    const body = await second.json<{ error: { code: string } }>();
+    const body = (await second.json()) as { error: { code: string } };
     expect(body.error.code).toBe("HANDOFF_NOT_FOUND");
   });
 
@@ -84,7 +86,7 @@ describe("POST /api/desktop/exchange", () => {
       makeContext(jsonPost(URL_EXCHANGE, { handoff_code: handoffCode, handoff_verifier: wrongVerifier }), testEnv),
     );
     expect(res.status).toBe(400);
-    const body = await res.json<{ error: { code: string } }>();
+    const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("VERIFIER_MISMATCH");
     // one-time consume happened before verifier check → code now gone
     const retry = await onRequestPost(
@@ -110,7 +112,7 @@ describe("POST /api/desktop/exchange", () => {
     const res = await onRequestPost(
       makeContext(jsonPost(URL_EXCHANGE, { handoff_code: handoffCode, handoff_verifier: verifier }), testEnv),
     );
-    const body = await res.json<{ expires_in: number }>();
+    const body = (await res.json()) as { expires_in: number };
     expect(body.expires_in).toBe(300);
   });
 });

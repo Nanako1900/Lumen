@@ -1,5 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { env } from "cloudflare:test";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { onRequestGet as authLogin } from "./login";
 import { onRequestGet as authCallback } from "./callback";
 import { onRequestPost as authLogout } from "./logout";
@@ -10,6 +9,7 @@ import {
   idpTokenRoute,
   idpUserinfoRoute,
   fakeJwt,
+  makeEnv,
 } from "../_lib/testutil";
 import {
   AUTH_FLOW_COOKIE,
@@ -22,7 +22,10 @@ import {
 } from "../_lib/session";
 import type { Env } from "../_lib/env";
 
-const testEnv = env as unknown as Env;
+let testEnv: Env;
+beforeEach(() => {
+  testEnv = makeEnv(); // 每个用例新建 Env（会话/流程为 stateless cookie，KV 隔离亦一并保证）
+});
 
 let restoreFetch: (() => void) | null = null;
 afterEach(() => {
@@ -142,7 +145,7 @@ describe("GET /api/me", () => {
   it("returns 401 when not logged in", async () => {
     const res = await apiMe(makeContext(new Request("https://test.example/api/me"), testEnv));
     expect(res.status).toBe(401);
-    const body = await res.json<{ error: { code: string } }>();
+    const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("UNAUTHENTICATED");
   });
 
@@ -158,7 +161,7 @@ describe("GET /api/me", () => {
     });
     const res = await apiMe(makeContext(req, testEnv));
     expect(res.status).toBe(200);
-    const body = await res.json<{ display_name: string; avatar_url: string }>();
+    const body = (await res.json()) as { display_name: string; avatar_url: string };
     expect(body.display_name).toBe("Eve");
     expect(body.avatar_url).toBe("https://img/e.png");
   });

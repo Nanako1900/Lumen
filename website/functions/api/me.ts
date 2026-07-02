@@ -5,6 +5,7 @@
  * 不调用 Lumen API，仅回显来自 OIDC 的会话内资料。
  */
 import type { Env } from "../_lib/env";
+import type { PagesFunction } from "../_lib/runtime";
 import { json, jsonError } from "../_lib/http";
 import { openSession, readSessionCookie } from "../_lib/session";
 

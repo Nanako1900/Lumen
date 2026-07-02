@@ -1,5 +1,4 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { env } from "cloudflare:test";
 import {
   buildAuthorizeUrl,
   subjectFrom,
@@ -8,10 +7,9 @@ import {
   exchangeAuthCode,
   refreshWithIdp,
 } from "./oidc";
-import { fakeJwt, stubFetch, idpTokenRoute } from "./testutil";
-import type { Env } from "./env";
+import { fakeJwt, stubFetch, idpTokenRoute, makeEnv } from "./testutil";
 
-const testEnv = env as unknown as Env;
+const testEnv = makeEnv();
 
 let restoreFetch: (() => void) | null = null;
 afterEach(() => {
