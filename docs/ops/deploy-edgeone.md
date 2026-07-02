@@ -1,7 +1,7 @@
 # 部署：官网前端 → 腾讯 EdgeOne Pages（步骤清单）
 
 > 目标：把 `website/`（React 静态 SPA + Pages Functions 登录中介 + KV）部署到腾讯 **EdgeOne Pages**。
-> ⚠️ 前提：官网移植 PR `feat/website-edgeone`（Cloudflare → EdgeOne）**已合并**。若尚未合并，先合并再按本清单执行。
+> ✅ 前提已满足：官网 EdgeOne 化已并入 `main`（PR #39，CI 绿）。可直接按本清单执行。
 > 占位：`example.com`（官网域名）、`chat.example.com`（API，用于下载页）、IdP 值——按实际替换。
 > 🔎 标注 `EDGEONE-VERIFY` 的项：以 EdgeOne 控制台/CLI 实际字段为准（本清单按 Cloudflare-Pages 兼容模型给出，落地时核对）。
 

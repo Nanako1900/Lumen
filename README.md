@@ -63,4 +63,4 @@
 - **IdP 登记与配置对齐**：[`docs/ops/idp-setup.md`](./docs/ops/idp-setup.md)（回调、`aud=lumen-api`、scope、issuer/audience/域名/端口三方对齐矩阵）。
 - **登录链路集成校验（无客户端）**：[`docs/ops/verify-login.md`](./docs/ops/verify-login.md) + [`scripts/`](./scripts)（healthz / Bearer bootstrap / WS `auth_ok`；半自动 handoff；access_token 不进 URL 核对）。
 - **部署 · 后端**：[`docs/ops/deploy-coolify.md`](./docs/ops/deploy-coolify.md)（Coolify：PostgreSQL + 8080/Traefik + 40000/udp + env + healthz）。
-- **部署 · 前端**：[`docs/ops/deploy-edgeone.md`](./docs/ops/deploy-edgeone.md)（EdgeOne Pages：KV 绑定 + Secrets + 域名；**待官网 EdgeOne 移植 PR 合并后执行**）。
+- **部署 · 前端**：[`docs/ops/deploy-edgeone.md`](./docs/ops/deploy-edgeone.md)（EdgeOne Pages：KV 绑定 + Secrets + 域名；官网已 EdgeOne 化并入 `main`，可直接执行）。
