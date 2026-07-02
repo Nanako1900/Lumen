@@ -2,7 +2,7 @@
 
 > 关联 Issue: #8（服务端+官网侧可验证部分；**全链路语音冒烟需 Windows 客户端**，见 §4）｜ 依据设计: [`protocol-design.md §2.5`](../design/protocol-design.md#25-ws-握手时序) / [`§6.1`](../design/protocol-design.md) / [`web-design.md §5`](../design/web-design.md#5-web-中介登录桌面)
 >
-> 目标：**不依赖 Windows 客户端**，验证「桌面经官网登录 → 拿 access_token → 连服务端 → 收 `auth_ok{user}`」这条链路中**服务端 + 官网**可独立验证的部分。占位域名 `example.com`/`chat.example.com` 落地替换；本地用 `localhost`/`127.0.0.1`。
+> 目标：**不依赖 Windows 客户端**，验证「桌面经登录中介（Go 服务端）登录 → 拿 access_token → 连服务端 → 收 `auth_ok{user}`」这条链路中**服务端（资源服务器 + 登录中介）**可独立验证的部分。占位域名 `example.com`/`chat.example.com` 落地替换；本地用 `localhost`/`127.0.0.1`。
 
 ## 脚本一览（`scripts/`）
 
@@ -21,16 +21,16 @@
 复刻桌面回环 handoff 时序（[`web-design.md §5.2`](../design/web-design.md#52-桌面登录时序回环-handoff)），用浏览器手动完成 IdP 登录，脚本负责生成/校验参数并做 exchange：
 
 ```bash
-# 生产（真实官网 + 真实 IdP）
-WEB_BASE=https://example.com bash scripts/verify-handoff.sh
+# 生产（真实后端 + 真实 IdP）—— 登录中介在 Go 服务端 chat.example.com
+WEB_BASE=https://chat.example.com bash scripts/verify-handoff.sh
 
-# 本地（wrangler pages dev + 本地/测试 IdP client）
-WEB_BASE=http://localhost:8788 LOOPBACK_PORT=53123 bash scripts/verify-handoff.sh
+# 本地（go run ./cmd/lumen-server 起中介 + 本地/测试 IdP client）
+WEB_BASE=http://localhost:8080 LOOPBACK_PORT=53123 bash scripts/verify-handoff.sh
 ```
 
 流程：
 
-1. 脚本生成 `handoff_verifier` + `state` + `challenge=S256(handoff_verifier)`，打印一条 `example.com/desktop/login?redirect_uri=http://127.0.0.1:<port>/cb&state=&challenge=` 登录 URL。
+1. 脚本生成 `handoff_verifier` + `state` + `challenge=S256(handoff_verifier)`，打印一条 `chat.example.com/desktop/login?redirect_uri=http://127.0.0.1:<port>/cb&state=&challenge=` 登录 URL。
 2. 在浏览器打开它，完成 IdP 登录；浏览器最终 302 到 `http://127.0.0.1:<port>/cb?handoff_code=&state=`。
 3. 把地址栏那条回环 URL **整条**粘回脚本。
 4. 脚本自动校验并 exchange，逐项打印 `[OK]/[!!]`：
@@ -122,7 +122,7 @@ API_BASE=http://127.0.0.1:8080 WS_URL=ws://127.0.0.1:8080/ws ACCESS_TOKEN="$ACCE
       ( cd website && npm run build && ! grep -rIn --exclude-dir=node_modules "$KNOWN_SECRET_SUBSTRING" dist/ ) \
         && echo "OK: 产物无 secret" || echo "!! 产物疑似含 secret"
       ```
-      （落地时用真实 secret 的一个片段做 needle；或直接确认构建仅 Worker 读 `env`、前端不引用 secret 变量。）
+      （落地时用真实 secret 的一个片段做 needle；或直接确认 secret 仅注入 Go 服务端环境变量、前端产物不含任何 secret。）
 
 ---
 

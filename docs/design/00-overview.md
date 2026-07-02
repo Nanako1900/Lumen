@@ -2,7 +2,9 @@
 
 > 文档版本: 1.0
 > 状态: 设计总览（导航 + 决策 + 路线图）
-> 适用范围: Lumen 全系统（外部身份提供方 + 官网/Web 中介 + Windows 客户端 + 单 Go 服务端）
+> 适用范围: Lumen 全系统（外部身份提供方 + 静态 SPA 官网 + Windows 客户端 + 单 Go 服务端 = 资源服务器 + 登录 broker）
+>
+> **架构（single-backend，权威——用户已决定）**：EdgeOne Pages = **纯静态**，只发布构建后的 React SPA（`website/dist/`），**无 Pages Functions、无 EdgeOne KV、无任何 secret**。登录 broker 已整体移入**单 Go 服务端**（`chat.example.com`），后者现是**唯一后端 = 资源服务器（JWT/JWKS 验签，既有）+ OIDC 登录 broker（新增，commit `82f344e`）**。`client_secret` 与 `refresh_token` **只**存于服务端（Postgres；refresh_token 用独立密钥加密于列）。桌面 handoff 线协议**逐字节保留**，仅宿主由 `example.com` 改为 `chat.example.com`。
 > 配套设计: [协议契约](./protocol-design.md)、[服务端设计](./server-design.md)、[客户端设计](./client-design.md)、[官网设计](./web-design.md)
 
 Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Windows 桌面客户端 + 单 Go 二进制服务端，对接已有的外部 OAuth2/OIDC 身份服务器，用 Coolify(Docker) 部署。本文是全局总览与导航；**接口契约的唯一权威是 [`protocol-design.md`](./protocol-design.md)**，本文与各详细设计如有冲突，以契约为准。
@@ -43,7 +45,7 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 - **资料零维护**：`display_name`/`avatar` 全部来自 OIDC，**双向保持同步**，应用内不编辑资料。
 - **桌面原生集成**：全局 PTT 热键（游戏全屏可用）、系统托盘、最小化隐藏、单实例锁、开机自启、内置自动更新。
 - **极简运维**：单 Go 二进制 + 托管 PostgreSQL，Coolify(Docker) 一键部署，全部配置走环境变量。
-- **官网（登录中介 + 营销/下载/账户中心）**：React + TailwindCSS 部署于 Cloudflare Pages/Functions/KV，作为桌面登录的 Web 中介（confidential OIDC client），并承载营销页、客户端下载与账户中心（OIDC 资料展示 + 退出）。
+- **官网（静态 SPA：营销/下载/账户中心 UI）**：React + TailwindCSS 构建为**纯静态站**，部署于 EdgeOne Pages（只发布 `website/dist/`，无 Functions/KV/secret）。登录中介与账户中心的**服务端逻辑不在 EdgeOne**——SPA 跨源调用 Go 服务端（`chat.example.com`）上的登录 broker（confidential OIDC client 在服务端）。
 
 ### 1.2 非目标（明确不做 / 推迟）
 
@@ -70,11 +72,11 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 |------|------|------|------|
 | **产品形态** | 类 Discord 的轻量语音聊天（开黑），2~6 人/语音频道，单 guild | v0 | [协议 §1.2](./protocol-design.md#12-单服务器模型single-guild) |
 | **客户端平台** | 仅 Windows/amd64 | v0 | [客户端 §1](./client-design.md#1-整体架构与职责切分) |
-| **服务端形态** | 单 Go 二进制，Coolify(Docker) 部署 | v0 | [服务端 §1](./server-design.md#1-模块包结构与依赖方向) |
+| **服务端形态** | 单 Go 二进制 = **资源服务器 + OIDC 登录 broker**，Coolify(Docker) 部署（`chat.example.com`） | v0 | [服务端 §1](./server-design.md#1-模块包结构与依赖方向) / [服务端 §10](./server-design.md#10-登录-broker账户中心--桌面登录中介) |
 | **身份** | 对接外部 OAuth2/OIDC（不自建）；access_token=JWT；JWKS 本地验签（签名+iss+aud+exp） | v0 | [协议 §2](./protocol-design.md#2-鉴权流程总览) |
-| **官网** | React + TailwindCSS，部署于 Cloudflare Pages(静态) + Pages Functions/Worker + KV；承载登录中介 + 营销/下载 + 账户中心 | v0 | [官网 §1](./web-design.md#1-概述与定位) / [官网 §2](./web-design.md#2-技术栈与部署) |
-| **Web 中介登录** | 官网为 confidential OIDC client（`client_secret` 仅在 Cloudflare Worker 加密环境变量）；桌面经官网登录（回环 handoff），获 `desktop_session_id`；refresh_token 不出 Cloudflare（存 KV SESSIONS） | v0 | [官网 §5](./web-design.md#5-web-中介登录桌面) |
-| **客户端配置** | 桌面内置 `LUMEN_WEB_BASE_URL`(默认 `https://example.com`)、`LUMEN_API_BASE_URL`、`LUMEN_WS_URL`；不再内置 issuer/client_id/scope（移至官网 Worker） | v0 | [官网 §9](./web-design.md#9-配置环境变量kvsecrets) / [客户端 §2](./client-design.md#2-go-后端oauth2-pkce-登录与-token-管理) |
+| **官网** | React + TailwindCSS 构建为**纯静态 SPA**，部署于 EdgeOne Pages（**只发布 `website/dist/`，无 Functions/无 KV/无 secret**）；承载营销/下载 + 账户中心 UI；登录/账户 API 在 Go 服务端 | v0 | [官网 §1](./web-design.md#1-概述与定位) / [官网 §2](./web-design.md#2-技术栈与部署) |
+| **登录 broker（服务端托管）** | broker 为 confidential OIDC client，**驻留 Go 服务端**（`client_secret` 走 `LUMEN_OAUTH_CLIENT_SECRET`，仅服务端）；桌面经 broker 登录（回环 handoff），获 `desktop_session_id`；`refresh_token` 仅存服务端 Postgres（`desktop_sessions.refresh_token_enc`，独立密钥加密） | v0 | [服务端 §10](./server-design.md#10-登录-broker账户中心--桌面登录中介) |
+| **客户端配置** | 桌面基址指向 `chat.example.com`（broker+API+WS 同域）；不内置 issuer/client_id/scope（在服务端 broker）。handoff 线协议不变，未来客户端改动 = **仅 base URL** | v0 | [服务端 §10.1](./server-design.md#101-broker-包与-9-个路由) / [客户端 §2](./client-design.md#2-go-后端oauth2-pkce-登录与-token-管理) |
 | **验签库** | `keyfunc/v3` + `golang-jwt/jwt/v5`，强制 RS256（防 alg 混淆/none） | v0 | [服务端 §2.1](./server-design.md#21-jwks-本地验签keyfunc-v3--golang-jwt-v5) |
 | **introspection** | 不实现（不在本期范围） | — | [协议 §2.1](./protocol-design.md#21-身份模型) |
 | **准入** | 凡能登录者皆可进入；首次验证按 `sub` 在 `users` 表 upsert；无白名单 | v0 | [协议 §2.1](./protocol-design.md#21-身份模型) |
@@ -94,11 +96,12 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 | **E2E 加密** | 推迟到 v2；v0/v1 仅依赖传输层 DTLS-SRTP；v2 用 Insertable Streams + SFrame，房间共享对称密钥起步 | v2 | [协议 附录 A](./protocol-design.md#附录-av2-e2e-加密概述) |
 | **客户端外壳** | Wails v2 Go 外壳 + Svelte 前端（WebView2）；Bindings + Events 双通道 | v0 | [客户端 §1.3](./client-design.md#13-bindingevents-通信约定) |
 | **桌面集成** | 全局 PTT 热键（后台/全屏游戏）、系统托盘+最小化隐藏、单实例锁、开机自启、内置自动更新；未选桌面 toast 通知 | v1 | [客户端 §3](./client-design.md#3-go-后端桌面集成ptt托盘最小化单实例自启) |
-| **token 存储** | 桌面只存不透明高熵 `desktop_session_id`（Windows Credential Manager `wincred`/DPAPI）；access_token 仅内存；refresh_token 不落桌面，存官网 KV SESSIONS | v0 | [客户端 §2.3](./client-design.md#23-token-安全存储仅-windows用-wincred) / [官网 §5](./web-design.md#5-web-中介登录桌面) |
-| **部署** | Coolify(Docker)；Traefik 终结 TLS 提供 WSS（HTTP/TCP）；WebRTC UDP 媒体不经 Traefik，单独裸映射 UDP 端口；容器内监听明文 HTTP/WS | v0 | [服务端 §7](./server-design.md#7-部署coolify) |
+| **token 存储** | 桌面只存不透明高熵 `desktop_session_id`（Windows Credential Manager `wincred`/DPAPI）；access_token 仅内存；`refresh_token` 不落桌面，仅存服务端 Postgres（`desktop_sessions.refresh_token_enc`，AES-256-GCM，独立 `LUMEN_REFRESH_ENC_KEY`） | v0 | [客户端 §2.3](./client-design.md#23-token-安全存储仅-windows用-wincred) / [服务端 §10.3](./server-design.md#103-store-broker-两表--janitor) |
+| **CORS（同 SITE 跨源）** | SPA(`example.com`) 跨源调 broker(`chat.example.com`)，二者同 SITE；会话 cookie=`SameSite=Lax+HttpOnly+Secure+Path=/+HOST-ONLY(无 Domain)`；服务端仅对精确 `LUMEN_WEB_BASE_URL` 源发 CORS(带 credentials)，永不用 `*`；SPA XHR 用 `credentials:'include'`，`/auth/*` 为顶层导航 | v0 | [服务端 §10.5](./server-design.md#105-账户中心-cookie同-site-跨源) / [服务端 §10.6](./server-design.md#106-单点-cors-中间件) |
+| **部署** | 官网=EdgeOne Pages **纯静态**（`website/dist/`）；Go 服务端=Coolify(Docker)；Traefik 终结 TLS 提供 WSS（HTTP/TCP）；WebRTC UDP 媒体不经 Traefik，单独裸映射 UDP 端口；容器内监听明文 HTTP/WS | v0 | [服务端 §7](./server-design.md#7-部署coolify) |
 | **配置** | 全部走环境变量（Coolify 注入），启动校验必填项 fail-fast | v0 | [服务端 §6.1](./server-design.md#61-配置全部环境变量) |
 | **ID 生成** | ULID（26 字符），服务端生成；`messages.id` 单调递增兼作分页游标 | v0 | [协议 §5.5](./protocol-design.md#55-id-生成约定) |
-| **持久化** | PostgreSQL（`jackc/pgx/v5`，纯 Go、CGO_ENABLED=0），连接池；仅三表 `users`/`channels`/`messages` | v0 | [服务端 §5.1](./server-design.md#51-store-封装postgresql) |
+| **持久化** | PostgreSQL（`jackc/pgx/v5`，纯 Go、CGO_ENABLED=0），连接池；业务三表 `users`/`channels`/`messages` + broker 两表 `broker_states`/`desktop_sessions`（架构变更新增） | v0 | [服务端 §5.1](./server-design.md#51-store-封装postgresql) / [§10.3](./server-design.md#103-store-broker-两表--janitor) |
 
 > **默认频道为 v0 引导项**：首次部署在迁移后幂等种子默认频道（text『大厅』+ voice『开黑1』，确定性 ULID + ON CONFLICT DO NOTHING），使 v0 空库部署即可发文字/进语音，不依赖 v1 的 owner 频道 CRUD（[协议 §5.2.1](./protocol-design.md#521-首次部署种子频道) / [服务端 §5.1](./server-design.md#51-store-封装postgresql)）。
 
@@ -106,7 +109,7 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 
 ## 3. 四方架构与四条主数据通路
 
-### 3.1 四方架构（身份 / 官网 Cloudflare / 客户端 / 服务端）
+### 3.1 四方架构（身份 / 静态 SPA / 客户端 / 服务端=资源服务器+broker）
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -114,59 +117,60 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 │     OAuth2 / OIDC 服务器（如 Keycloak）                                  │
 │     - Authorization Code + PKCE 登录    - JWKS 公钥端点（验签）           │
 │     - userinfo 端点（资料同步）          - 签发 JWT access_token(aud含lumen-api)│
-└──▲─────────────────────────────▲──────────────────────────▲────────────┘
-   │ 官网中介 IdP                  │ 网页账户中心 OIDC          │ 拉 JWKS/userinfo
-   │ (Auth Code+PKCE,confidential)│ (PKCE)                    │ (服务端本地验签)
-┌──┴───────────────────────────┐ │                ┌──────────┴─────────────────┐
-│ ② 官网层（Cloudflare）         │ │                │  ④ 服务端层（单 Go 二进制）     │
-│   React+Tailwind / Pages      │ │                │                              │
-│  ┌─────────────┐ ┌──────────┐ │ │                │  ┌────────┐ ┌──────────────┐ │
-│  │ Pages 静态   │ │ Worker   │ │ │                │  │ REST   │ │ WS hub       │ │
-│  │ - 营销/下载  │ │ - 登录中介│◀┘                │  │ handler│ │ (信令/广播)  │ │
-│  │ - 账户中心   │ │ - secret │ │                  │  │        │ │              │ │
-│  └─────────────┘ │ - KV      │ │                  │  └───┬────┘ └──────┬───────┘ │
-│                  │ HANDOFF/  │ │                  │      │  auth/owner  │         │
-│                  │ SESSIONS  │ │                  │      ▼              ▼         │
-│                  └─────▲─────┘ │                  │  ┌──────┐  ┌──────────────┐  │
-└────────────────────────┼───────┘                  │  │store │  │ Pion SFU     │  │
-   /desktop/login,callback│ exchange/refresh/logout  │  │PgSQL │  │ (UDPMux 单口)│  │
-   (回环 handoff)          │ {access_token,           │  └──────┘  └──────────────┘  │
-┌────────────────────────┴───────┐  desktop_session_id} └────────────▲─────────────┘
-│  ③ 客户端层（Windows，Wails v2） │                                     │
-│  ┌──────────────┐ ┌─────────────┐│  access_token (Bearer / WS auth)   │
-│  │ Go 外壳       │ │ Svelte 前端 ││  HTTPS / WSS / DTLS-SRTP           │
-│  │ - 委托官网登录│ │ - REST/WS   │┼────────────────────────────────────┘
-│  │ - 持session_id│◀▶│ - WebRTC   ││
-│  │ - access内存  │ │ - Web Audio ││
-│  │ - PTT 热键    │ │ - RNNoise   ││
-│  │ - 托盘/自启   │ │ - 说话检测  ││
-│  │ - 自动更新    │ │             ││
+└──────────────────────────────────────────▲──────────────▲──────────────┘
+                        broker 中介 IdP       │              │ 拉 JWKS/userinfo
+                        (Auth Code+PKCE,       │              │ (服务端本地验签)
+                         confidential;         │              │
+                         client_secret 在服务端)│              │
+┌──────────────────────────┐                  ┌┴──────────────┴──────────────────┐
+│ ② 官网层（EdgeOne Pages）  │                  │  ④ 服务端层（单 Go 二进制，chat.*） │
+│   React+Tailwind          │  SPA 跨源(同SITE) │   = 资源服务器 + 登录 broker       │
+│   *纯静态* website/dist/   │  credentials:    │  ┌────────┐ ┌──────────────┐    │
+│  ┌──────────────────────┐ │  'include'       │  │ broker │ │ REST /api/v1 │    │
+│  │ 营销/下载 + 账户中心UI │─┼─────────────────▶│  │ 9 路由 │ │ WS hub(信令) │    │
+│  │ (无 Functions/无 KV/   │ │  /auth/* 顶层导航 │  │ +secure│ │ (广播)       │    │
+│  │  无 secret)            │ │◀────Set-Cookie──┤  └───┬────┘ └──────┬───────┘    │
+│  └──────────────────────┘ │  (HOST-ONLY,Lax) │      │  auth/owner  │            │
+└──────────────────────────┘                  │      ▼              ▼            │
+   SPA fetch /updates/latest.json ────────────▶│  ┌──────┐  ┌──────────────┐     │
+                                                │  │store │  │ Pion SFU     │     │
+┌────────────────────────────────┐             │  │PgSQL │  │ (UDPMux 单口)│     │
+│  ③ 客户端层（Windows，Wails v2） │             │  │+broker│ └──────────────┘     │
+│  ┌──────────────┐ ┌─────────────┐│ 回环 handoff │  │表/加密│         ▲            │
+│  │ Go 外壳       │ │ Svelte 前端 ││ (base URL=   │  └──────┘         │            │
+│  │ - 委托登录    │ │ - REST/WS   ││  chat.*)     └───────────────────┼────────────┘
+│  │ - 持session_id│◀▶│ - WebRTC   │┼──── /desktop/*、/api/desktop/* ──┘
+│  │ - access内存  │ │ - Web Audio ││  access_token (Bearer / WS auth)
+│  │ - PTT/托盘/更新│ │ - RNNoise   ││  HTTPS / WSS / DTLS-SRTP → 同一 chat.* 服务端
 │  └──────────────┘ └─────────────┘│
 │   Bindings / Events 双通道         │
 └────────────────────────────────────┘
 ```
 
-> **关键流向**：桌面**经官网登录**（不再自跑 IdP PKCE）；**官网中介 IdP**（confidential client，`client_secret` 仅在 Worker）；桌面用 access_token **直连 Go 服务端**（契约不变）；**Go 服务端仍只用 IdP JWKS 本地验 access_token**，不感知官网。
+> **关键流向**：桌面**经服务端 broker 登录**（不自跑 IdP PKCE）；**broker 中介 IdP**（confidential client，`client_secret` 仅在服务端）；桌面用 access_token 连**同一** Go 服务端（handoff 线协议不变，仅宿主 `example.com→chat.example.com`）；**Go 服务端用 IdP JWKS 本地验 access_token**（资源侧逻辑不变）。SPA 直接 `fetch chat.example.com/updates/latest.json`（无下载代理）。
 
 **层职责边界**：
 
 | 层 | 职责 | 关键约束 |
 |----|------|----------|
-| ① 身份层 | 登录、签发 JWT、暴露 JWKS/userinfo | 外部已有，本设计不实现；官网与服务端指向**同一** issuer/audience（access_token `aud` 含 `lumen-api`） |
-| ② 官网层 | 登录中介（confidential OIDC client + 回环 handoff）、KV 会话（HANDOFF/SESSIONS）、营销/下载、账户中心 | `client_secret` 仅在 Worker 加密环境变量；refresh_token 不出 Cloudflare；不调 Lumen API（[官网 §5](./web-design.md#5-web-中介登录桌面)） |
-| ③ 客户端层 | Go 外壳管原生能力（委托官网登录/凭据/热键/托盘/更新）；前端管 UI+网络+WebRTC+音频 | 不内置 IdP issuer/client_id/scope；只持 `desktop_session_id`，access_token 仅内存（[客户端 §1.2](./client-design.md#12-职责切分原则)） |
-| ④ 服务端层 | 验签、REST 数据、WS 信令/广播、SFU 转发、PostgreSQL 持久化 | 容器内只监听明文 HTTP/WS；TLS 由 Traefik 终结；UDP 媒体裸端口直发；不感知官网，无需 CORS |
+| ① 身份层 | 登录、签发 JWT、暴露 JWKS/userinfo | 外部已有，本设计不实现；broker 与资源验签指向**同一** issuer/audience（access_token `aud` 含 `lumen-api`） |
+| ② 官网层（EdgeOne，纯静态） | 只发布构建后的 React SPA（`website/dist/`）：营销/下载 + 账户中心 UI | **无 Pages Functions、无 EdgeOne KV、无任何 secret**；`edgeone.json` 仅留 build 配置 + SPA rewrites；所有登录/账户 API 由服务端 broker 跨源提供 |
+| ③ 客户端层 | Go 外壳管原生能力（委托 broker 登录/凭据/热键/托盘/更新）；前端管 UI+网络+WebRTC+音频 | 不内置 IdP issuer/client_id/scope；只持 `desktop_session_id`，access_token 仅内存（[客户端 §1.2](./client-design.md#12-职责切分原则)） |
+| ④ 服务端层 | **资源服务器**（验签、REST 数据、WS 信令/广播、SFU 转发、Postgres）**+ 登录 broker**（9 端点、`client_secret`/`refresh_token`、账户中心 cookie 会话） | 容器内只监听明文 HTTP/WS；TLS 由 Traefik 终结；UDP 媒体裸端口直发；对精确 `LUMEN_WEB_BASE_URL` 源发 CORS（同 SITE 跨源，[服务端 §10.6](./server-design.md#106-单点-cors-中间件)） |
 
 ### 3.2 四条主数据通路
 
 ```
-通路 A：身份/鉴权（Web 中介 handoff + HTTPS + WS 首帧）──────────────────
-  客户端 Go ──系统浏览器(回环 handoff)──▶ 官网 Worker ──Auth Code+PKCE──▶ OAuth2 服务器
-  官网 Worker ──client_secret 换 token──▶ OAuth2 ──access+refresh──▶ Worker(KV)
-  客户端 Go ──POST /api/desktop/exchange──▶ 官网 ──{access_token,desktop_session_id,profile}──▶ 客户端
-  客户端前端 ──Bearer / WS auth(JWT)──▶ 服务端 ──JWKS 本地验签──▶ OAuth(拉公钥)
+通路 A：身份/鉴权（服务端 broker handoff + HTTPS + WS 首帧）─────────────────
+  客户端 Go ──系统浏览器(回环 handoff)──▶ 服务端 broker /desktop/login ──Auth Code+PKCE──▶ OAuth2 服务器
+  服务端 broker ──client_secret 换 token──▶ OAuth2 ──access+refresh──▶ broker(Postgres broker_states/desktop_sessions)
+  客户端 Go ──POST chat.*/api/desktop/exchange──▶ broker ──{access_token,desktop_session_id,profile}──▶ 客户端
+  客户端前端 ──Bearer / WS auth(JWT)──▶ 同一服务端(资源侧) ──JWKS 本地验签──▶ OAuth(拉公钥)
   通过 → upsert(资料同步) → 绑定 sub 到会话 → auth_ok{user}
-  刷新：客户端 ──POST /api/desktop/refresh{desktop_session_id}──▶ 官网 ──新 access_token──▶ 客户端
+  刷新：客户端 ──POST chat.*/api/desktop/refresh{desktop_session_id}──▶ broker ──新 access_token──▶ 客户端
+  (refresh_token 仅存服务端 Postgres，加密于列；桌面只持 desktop_session_id)
+  账户中心(SPA 跨源)：浏览器 ──顶层导航 chat.*/auth/login──▶ IdP ──▶ /auth/callback 设 HOST-ONLY cookie
+                    SPA XHR ──credentials:'include' chat.*/api/me──▶ broker ──{display_name,avatar_url}──▶ SPA
 
 通路 B：非实时数据（REST，HTTPS 经 Traefik 终结 TLS）──────────────────
   客户端前端 ──GET /api/v1/bootstrap|messages|channels|members──▶ Traefik
@@ -200,7 +204,7 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 | [`protocol-design.md`](./protocol-design.md) | **唯一权威接口契约**：REST 端点、WS 消息、JSON Schema、PostgreSQL DDL、错误码、时间/命名规范 | 前后端共同遵守 |
 | [`server-design.md`](./server-design.md) | 服务端实现蓝图：包结构、auth/signaling/sfu/store/rest 模块、配置、并发、优雅关闭、Coolify 部署 | 服务端实现者 |
 | [`client-design.md`](./client-design.md) | 客户端实现蓝图：Wails 外壳（登录/桌面/更新）、Svelte 前端、语音流水线、重协商、断线重连 | 客户端实现者 |
-| [`web-design.md`](./web-design.md) | 官网实现蓝图：React+Tailwind/Cloudflare 部署、Web 中介登录（回环 handoff + KV 会话）、网页账户中心、安全红线、配置 | 官网实现者 |
+| [`web-design.md`](./web-design.md) | 官网实现蓝图：React+Tailwind **纯静态 SPA**（EdgeOne Pages）、账户中心 UI（跨源调服务端 broker）、SPA 路由/构建配置、下载页；登录 broker 服务端契约见 [服务端 §10](./server-design.md#10-登录-broker账户中心--桌面登录中介) | 官网实现者 |
 | `docs/research/01-pion-sfu.md` … `06-frontend-webrtc-rnnoise.md` | 选型/骨架调研依据（被上述设计引用） | 实现时参考 |
 | `docs/design/e2e-design.md`（未来） | v2 E2E 密钥分发/轮换 epoch/与重协商交互 | v2 实现者 |
 
@@ -208,8 +212,9 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 
 | 组件 | 客户端 | 服务端 | 契约 |
 |------|--------|--------|------|
-| 官网 / 中介登录（回环 handoff + KV 会话） | [§2](./client-design.md#2-go-后端oauth2-pkce-登录与-token-管理)（委托官网登录） | — | [官网 §5](./web-design.md#5-web-中介登录桌面) |
-| 委托官网登录 / token 管理 | [§2](./client-design.md#2-go-后端oauth2-pkce-登录与-token-管理) | — | [§2.2](./protocol-design.md#22-客户端取-tokenpkce仅参考) |
+| 静态 SPA 官网（营销/下载/账户中心 UI） | — | — | [官网 §1](./web-design.md#1-概述与定位) / [官网 §2](./web-design.md#2-技术栈与部署) |
+| 登录 broker（回环 handoff + 桌面会话 + 账户中心 cookie） | [§2](./client-design.md#2-go-后端oauth2-pkce-登录与-token-管理)（委托 broker 登录） | [§10](./server-design.md#10-登录-broker账户中心--桌面登录中介) | [官网 §5](./web-design.md#5-web-中介登录桌面) |
+| 委托 broker 登录 / token 管理 | [§2](./client-design.md#2-go-后端oauth2-pkce-登录与-token-管理) | [§10.1](./server-design.md#101-broker-包与-9-个路由) | [§2.2](./protocol-design.md#22-客户端取-tokenpkce仅参考) |
 | JWKS 验签 / owner 判定 / 资料映射 | — | [§2](./server-design.md#2-鉴权网关auth) | [§2.3](./protocol-design.md#23-服务端验签jwks-本地验签) / [§5.3](./protocol-design.md#53-owner-判定说明) |
 | REST 客户端 / handler | [§7.1](./client-design.md#71-rest-客户端) | [§5.4](./server-design.md#54-rest-handler-与契约对应) | [§3](./protocol-design.md#3-rest-api-完整清单) |
 | WS 客户端 / 信令 hub | [§7.2](./client-design.md#72-ws-客户端) | [§3](./server-design.md#3-信令模块signaling--ws) | [§4](./protocol-design.md#4-websocket-信令协议) |
@@ -229,12 +234,12 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 
 | 层 | 语言/运行时 | 核心框架 |
 |----|------------|----------|
-| 服务端 | Go 1.22+（构建用 golang:1.23-alpine，`CGO_ENABLED=0`） | net/http（Go 1.22 路由）、Pion WebRTC v4、jackc/pgx/v5 |
-| 客户端外壳 | Go（Wails v2，仅 Windows；托盘/全屏 PTT 需 `CGO_ENABLED=1`） | Wails v2、net/http（委托官网登录回环 handoff）、wincred（存 `desktop_session_id`） |
+| 服务端（资源 + broker） | Go 1.22+（构建用 golang:1.23-alpine，`CGO_ENABLED=0`） | net/http（Go 1.22 路由）、Pion WebRTC v4、jackc/pgx/v5、go-oidc/oauth2（broker）、crypto/aes-gcm（secure） |
+| 客户端外壳 | Go（Wails v2，仅 Windows；托盘/全屏 PTT 需 `CGO_ENABLED=1`） | Wails v2、net/http（委托 broker 登录回环 handoff）、wincred（存 `desktop_session_id`） |
 | 客户端前端 | TypeScript（WebView2/Chromium） | Svelte + Vite、原生 WebSocket/RTCPeerConnection/Web Audio |
-| 官网 | TypeScript（浏览器） / Cloudflare Worker 运行时 | React + TailwindCSS、Cloudflare Pages(静态) + Pages Functions/Worker + KV（HANDOFF/SESSIONS） |
-| 持久化 | PostgreSQL（pgx 连接池） | 三表：users/channels/messages |
-| 部署 | Docker / Coolify | Traefik 反代（TLS 终结/WSS）+ 裸 UDP 端口映射 |
+| 官网 | TypeScript（浏览器） | React + TailwindCSS，**构建为纯静态**部署于 EdgeOne Pages（`website/dist/`；无 Functions/无 KV/无 secret） |
+| 持久化 | PostgreSQL（pgx 连接池） | 五表：users/channels/messages + broker_states/desktop_sessions（[服务端 §10.3](./server-design.md#103-store-broker-两表--janitor)） |
+| 部署 | Docker / Coolify（服务端）+ EdgeOne Pages（官网静态） | Traefik 反代（TLS 终结/WSS）+ 裸 UDP 端口映射 |
 
 ### 5.2 服务端 Go 依赖
 
@@ -289,16 +294,16 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 
 **范围**（[服务端 §8](./server-design.md#8-v0v1-归属汇总) / [客户端 §14](./client-design.md#14-附录版本归属速查表) / [官网 §10](./web-design.md#10-v0-归属与验收)）：
 
-- 服务端：配置 fail-fast、JWKS 验签（RS256/iss/aud/exp）、owner 配置态判定、REST（`bootstrap`/`me`/`channels`/`messages`/`members`/`healthz`）、WS 握手（`auth`/`auth_ok`/`auth_error`）、文字（`send_message`/`message`）、语音加入离开（`join_channel`/`leave_channel`/`user_joined`/`user_left`）、`speaking_state`、WebRTC 信令（`webrtc_offer`/`webrtc_answer`/`ice_candidate`）、SFU（UDPMux+NAT1To1+mDNS off、Room、OnTrack 转发、重协商、清理）、store（三表+游标分页+ULID）、userinfo 兜底补齐 + 首次部署幂等种子默认频道（text『大厅』+ voice『开黑1』，确定性 ULID + ON CONFLICT DO NOTHING）。
-- 客户端：委托官网登录（回环 handoff，不再自跑 IdP PKCE）+ `desktop_session_id` 凭据存储 + 经官网 `refresh` 刷新 access_token + access_token 仅内存、REST 客户端、WS 客户端、WebRTC PC（单向 offerer 重协商）、上行采集管线（基础，可省 RNNoise）、说话检测、加入/离开语音、实时文字、状态广播渲染、深色主题、错误 toast、WS 重连 + PC 重建兜底。
-- 官网（Cloudflare）：Web 中介登录 Worker 端点（`/desktop/login`、`/desktop/callback`、`/api/desktop/exchange`、`/api/desktop/refresh`、`/api/desktop/logout`）+ KV（HANDOFF/SESSIONS）+ confidential OIDC client（`client_secret` 仅在 Worker）；网页账户中心登录（`/auth/login`、`/auth/callback`、`/auth/logout`，httpOnly cookie 会话）+ 营销/下载页 + 资料展示/退出（不调 Lumen API）。
-- 服务端：**不变**（仍只用 IdP JWKS 本地验 access_token；无需 CORS）。
+- 服务端（资源侧）：配置 fail-fast、JWKS 验签（RS256/iss/aud/exp）、owner 配置态判定、REST（`bootstrap`/`me`/`channels`/`messages`/`members`/`healthz`）、WS 握手（`auth`/`auth_ok`/`auth_error`）、文字（`send_message`/`message`）、语音加入离开（`join_channel`/`leave_channel`/`user_joined`/`user_left`）、`speaking_state`、WebRTC 信令（`webrtc_offer`/`webrtc_answer`/`ice_candidate`）、SFU（UDPMux+NAT1To1+mDNS off、Room、OnTrack 转发、重协商、清理）、store（五表+游标分页+ULID）、userinfo 兜底补齐 + 首次部署幂等种子默认频道（text『大厅』+ voice『开黑1』，确定性 ULID + ON CONFLICT DO NOTHING）。
+- 服务端（broker 侧，架构变更新增）：9 个 broker 端点（`/desktop/login`、`/desktop/callback`、`/api/desktop/exchange`、`/api/desktop/refresh`、`/api/desktop/logout`、`/auth/login`、`/auth/callback`、`/auth/logout`、cookie 版 `/api/me`）+ confidential OIDC client（`client_secret` 仅服务端）+ `broker_states`/`desktop_sessions` 两表 + 60s janitor + `internal/secure`（PKCE/AES-GCM）+ 账户中心 HOST-ONLY 封装 cookie + 单点精确 CORS（[服务端 §10](./server-design.md#10-登录-broker账户中心--桌面登录中介)）。`main.go` 落地（此前仅 `.gitkeep`）：装配 + janitor + 优雅关闭。
+- 客户端：委托 broker 登录（回环 handoff，不自跑 IdP PKCE）+ `desktop_session_id` 凭据存储 + 经 `chat.*/api/desktop/refresh` 刷新 access_token + access_token 仅内存、REST 客户端、WS 客户端、WebRTC PC（单向 offerer 重协商）、上行采集管线（基础，可省 RNNoise）、说话检测、加入/离开语音、实时文字、状态广播渲染、深色主题、错误 toast、WS 重连 + PC 重建兜底。
+- 官网（EdgeOne Pages，纯静态）：构建后的 React SPA（`website/dist/`，无 Functions/无 KV/无 secret）——营销/下载页 + 账户中心 UI（跨源调服务端 broker `/auth/*`、cookie 版 `/api/me`）+ 直接 `fetch chat.*/updates/latest.json`。`edgeone.json` 仅留 build 配置 + SPA rewrites。
 
 **验收标准**：
 
-- [ ] 桌面经官网登录（回环 handoff）成功：系统浏览器走官网 → 官网中介 IdP（confidential client）→ 回环回调 → `/api/desktop/exchange` 拿到 `{access_token, desktop_session_id, profile}`，并用 access_token 连上 Go 服务端（WS/REST）；`desktop_session_id` 落 Credential Manager（refresh_token 不落桌面），重启客户端免重登。
-- [ ] access_token 临期经 `POST /api/desktop/refresh{desktop_session_id}` 换新 access_token；session 失效返回 401（`SESSION_INVALID`）→ 客户端转重新登录；登出 `POST /api/desktop/logout` 后清凭据库 + 关 WS + 重置 store。
-- [ ] 网页账户中心：`/auth/login` OIDC(PKCE) 登录设 httpOnly cookie 会话；账户中心显示 OIDC 资料（头像/昵称）+ 下载客户端 + 退出；不调 Lumen API。
+- [ ] 桌面经服务端 broker 登录（回环 handoff）成功：系统浏览器走 `chat.*/desktop/login` → broker 中介 IdP（confidential client）→ 回环回调 → `chat.*/api/desktop/exchange` 拿到 `{access_token, desktop_session_id, profile}`，并用 access_token 连上同一 Go 服务端（WS/REST）；`desktop_session_id` 落 Credential Manager（refresh_token 仅存服务端 Postgres），重启客户端免重登。
+- [ ] access_token 临期经 `POST chat.*/api/desktop/refresh{desktop_session_id}` 换新 access_token；session 失效返回 401（`SESSION_INVALID`）→ 客户端转重新登录；登出 `POST chat.*/api/desktop/logout` 后清凭据库 + 关 WS + 重置 store。
+- [ ] 账户中心（EdgeOne 静态 SPA 跨源调服务端 broker）：`chat.*/auth/login` OIDC(PKCE) 登录设 HOST-ONLY 封装 cookie 会话；账户中心 SPA 以 `credentials:'include'` 调 `chat.*/api/me` 显示 OIDC 资料（头像/昵称）+ 下载客户端 + 退出；不调 Lumen API。CORS 仅放行精确 `LUMEN_WEB_BASE_URL`。
 - [ ] 服务端用 JWKS 本地验签通过（RS256），非法/过期/错 aud 的 token 被拒（`TOKEN_INVALID`/`TOKEN_EXPIRED`）。
 - [ ] `GET /api/v1/bootstrap` 一次返回 me/channels/members/voice_states/ws_url；首屏渲染频道树+成员。
 - [ ] 文字频道可发消息并实时广播；`messages?limit&before` 游标分页向上加载历史正常。
@@ -349,7 +354,7 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 
 ## 7. 部署与运维总览
 
-部署分两处：**Go 服务端**为 Coolify(Docker)（`chat.example.com`）——HTTP/WS 走 Traefik（终结 TLS、提供 WSS）、WebRTC UDP 媒体裸端口映射绕过 Traefik（完整步骤见 [服务端 §7](./server-design.md#7-部署coolify)）；**官网**为 Cloudflare Pages + Pages Functions/Worker + KV（`example.com`），承载登录中介与账户中心（详见 [官网 §2](./web-design.md#2-技术栈与部署) / [官网 §9](./web-design.md#9-配置环境变量kvsecrets)）。
+部署分两处：**Go 服务端**为 Coolify(Docker)（`chat.example.com`），是**唯一后端 = 资源服务器 + 登录 broker**——HTTP/WS 走 Traefik（终结 TLS、提供 WSS）、WebRTC UDP 媒体裸端口映射绕过 Traefik、broker 9 端点与 `/api/v1/*` 共用同一 HTTP 服务（完整步骤见 [服务端 §7](./server-design.md#7-部署coolify) / [服务端 §10](./server-design.md#10-登录-broker账户中心--桌面登录中介)）；**官网**为 EdgeOne Pages **纯静态**（`example.com`），只发布构建后的 React SPA（`website/dist/`），**无 Functions/无 KV/无 secret**（详见 [官网 §2](./web-design.md#2-技术栈与部署)）。
 
 ### 7.1 部署拓扑
 
@@ -395,7 +400,7 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 | `LUMEN_OAUTH_ISSUER` | OIDC issuer（校验 `iss` 及发现） | `https://auth.example.com/realms/lumen` | ✓ | v0 |
 | `LUMEN_OAUTH_JWKS_URL` | JWKS 端点（本地验签公钥源） | `https://auth.example.com/realms/lumen/protocol/openid-connect/certs` | ✓ | v0 |
 | `LUMEN_OAUTH_USERINFO_URL` | userinfo 端点（资料补齐）；**可选**，缺省由 OIDC discovery 推导 | `https://auth.example.com/realms/lumen/protocol/openid-connect/userinfo` | ✗ | v0 |
-| `LUMEN_OAUTH_AUDIENCE` | 期望的 `aud` 值（验 access_token；官网 client_id 在 Worker，服务端不需要） | `lumen-api` | ✓ | v0 |
+| `LUMEN_OAUTH_AUDIENCE` | 期望的 `aud` 值（资源侧验 access_token；broker 侧另用 `LUMEN_OAUTH_CLIENT_ID`） | `lumen-api` | ✓ | v0 |
 | `LUMEN_OWNER_SUBJECTS` | owner 的 OAuth sub 列表（逗号分隔） | `sub-abc,sub-def` | ✓ | v0 |
 | `LUMEN_LISTEN_ADDR` | HTTP/WS 监听地址（**必须 `0.0.0.0`**） | `0.0.0.0:8080` | ✓ | v0 |
 | `LUMEN_DATABASE_URL` | PostgreSQL 连接串（DSN） | `postgres://lumen:***@lumen-db:5432/lumen?sslmode=disable` | ✓ | v0 |
@@ -404,8 +409,16 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 | `LUMEN_PUBLIC_WS_URL` | 对外 WS 地址（`bootstrap.ws_url`）；缺省由 Host 头推导 | `wss://chat.example.com/ws` | ✗ | v0 |
 | `LUMEN_LOG_LEVEL` | 日志级别 `debug/info/warn/error`（默认 info） | `info` | ✗ | v0 |
 | `LUMEN_UPDATES_DIR` | 自动更新文件目录（`GET /updates/` 静态托管根）；**可选**，缺省 `/app/updates` | `/app/updates` | ✗ | v1 |
+| **登录 broker（随 broker 移入服务端而新增，[服务端 §6.1](./server-design.md#61-配置全部环境变量)/[§10](./server-design.md#10-登录-broker账户中心--桌面登录中介)）** | | | | |
+| `LUMEN_OAUTH_CLIENT_ID` | confidential OIDC client id（broker 用） | `lumen-web` | ✓ | v0 |
+| `LUMEN_OAUTH_CLIENT_SECRET` | confidential client_secret（**secret，仅服务端**） | `***` | ✓ | v0 |
+| `LUMEN_OAUTH_AUTHORIZE_URL` / `LUMEN_OAUTH_TOKEN_URL` | IdP authorize/token 端点；**可选**，缺省 discovery 推导 | — | ✗ | v0 |
+| `LUMEN_OAUTH_DESKTOP_REDIRECT_URI` | 桌面登录 IdP 回调 | `https://chat.example.com/desktop/callback` | ✓ | v0 |
+| `LUMEN_OAUTH_WEB_REDIRECT_URI` | 账户中心 IdP 回调 | `https://chat.example.com/auth/callback` | ✓ | v0 |
+| `LUMEN_WEB_BASE_URL` | SPA 官网源（CORS 精确白名单 + `/account` 重定向目标） | `https://example.com` | ✓ | v0 |
+| `LUMEN_SESSION_ENC_KEY` / `LUMEN_REFRESH_ENC_KEY` | 两把 AES-256 密钥（base64 各 32 字节；**须彼此不同**） | `<base64 32B>` | ✓ | v0 |
 
-> OAuth 参数（issuer/client_id/`client_secret`/scopes）已移至官网 Worker（Cloudflare Secrets），桌面不再内置；桌面只内置 `LUMEN_WEB_BASE_URL`/`LUMEN_API_BASE_URL`/`LUMEN_WS_URL`（详见 [官网 §9](./web-design.md#9-配置环境变量kvsecrets)）。官网与服务端必须指向**同一** issuer 与 audience（access_token `aud` 含 `lumen-api`）（[协议 §1.3](./protocol-design.md#13-全局配置项环境变量coolify-注入)）。
+> **EdgeOne 侧零 secret**：`client_secret`、两把 AES 密钥、`refresh_token` 全部只在 Go 服务端（Coolify env / Postgres）；EdgeOne Pages 纯静态、无环境 secret。IdP redirect_uri 现登记为 `chat.example.com/desktop/callback` 与 `chat.example.com/auth/callback`（原 `example.com/*`）。broker 与资源验签必须指向**同一** issuer 与 audience（access_token `aud` 含 `lumen-api`）。桌面回环 `redirect_uri` 仅允许 `http://127.0.0.1:<port>/…`，由服务端 broker 校验、不在 IdP 登记。
 
 ### 7.4 端口/IP 一致性（四处对齐）
 
@@ -414,8 +427,9 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 | WebRTC UDP 端口（如 `40000`） | Dockerfile `EXPOSE 40000/udp` = Coolify Ports Mappings = env `LUMEN_WEBRTC_UDP_PORT` = 云安全组放行 |
 | HTTP/WS 端口（如 `8080`） | Dockerfile `EXPOSE 8080` = Coolify Ports Exposes = env `LUMEN_LISTEN_ADDR` |
 | 公网 IP | env `LUMEN_PUBLIC_IP`（`SetNAT1To1IPs`）= VPS 实际公网 IP |
-| issuer/audience | 官网 Worker 配置（Secrets）= 服务端 `LUMEN_OAUTH_ISSUER`/`LUMEN_OAUTH_AUDIENCE` = OAuth2 服务器实际值（access_token `aud` 含 `lumen-api`） |
-| 官网 Base URL | 桌面 `LUMEN_WEB_BASE_URL`（默认 `https://example.com`）= 官网 Cloudflare Pages 域名 = IdP 登记的回调域名 |
+| issuer/audience | 服务端 `LUMEN_OAUTH_ISSUER`/`LUMEN_OAUTH_AUDIENCE`（broker 与资源验签共用）= OAuth2 服务器实际值（access_token `aud` 含 `lumen-api`） |
+| 官网 Base URL | 服务端 `LUMEN_WEB_BASE_URL`（`https://example.com`，CORS 白名单）= 官网 EdgeOne Pages 域名 = SPA 部署源 |
+| IdP redirect_uri | `LUMEN_OAUTH_DESKTOP_REDIRECT_URI`=`chat.example.com/desktop/callback` + `LUMEN_OAUTH_WEB_REDIRECT_URI`=`chat.example.com/auth/callback` = IdP 登记的两个回调（均在服务端域） |
 
 ### 7.5 防火墙与运维要点
 
@@ -425,26 +439,27 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 - 自动更新文件（`latest.json` + NSIS 安装包 + ed25519 签名）由服务端 Go 进程 `GET /updates/`（公开、免鉴权）静态托管，对外 `https://chat.example.com/updates/latest.json`（同域复用 Traefik 证书）；文件目录由 `LUMEN_UPDATES_DIR`（默认 `/app/updates`）指定，经 Coolify Persistent Storage 持久化（[客户端 §4.3](./client-design.md#43-与-coolify-托管更新文件的衔接) / [服务端 §7.7](./server-design.md#77-自动更新文件托管)）。
 - **更新托管核对项**：`/updates/latest.json` 可经 `https://chat.example.com/updates/` 访问，且 `latest.json` 响应头为 `Cache-Control: no-cache` + `ETag`（安装包文件名含版本号，可长缓存）。
 
-### 7.6 官网部署（Cloudflare Pages + Worker + KV + Secrets）
+### 7.6 官网部署（EdgeOne Pages，纯静态）+ 登录 broker（服务端）
 
-官网独立于 Coolify，部署于 Cloudflare（`example.com`），是桌面登录的 Web 中介（confidential OIDC client），并承载营销/下载与账户中心。完整契约见 [官网 §9](./web-design.md#9-配置环境变量kvsecrets)。
+**架构变更（权威）**：官网现为**纯静态站**，部署于 EdgeOne Pages（`example.com`），只发布构建后的 React SPA（`website/dist/`）；**无 Pages Functions、无 EdgeOne KV、无任何 secret**。登录中介与账户中心的**服务端逻辑全部移入 Go 服务端 broker**（`chat.example.com`，[服务端 §10](./server-design.md#10-登录-broker账户中心--桌面登录中介)）。
 
-| Cloudflare 资源 | 配置 | 作用 |
-|----------------|------|------|
-| Pages（静态） | React + TailwindCSS 构建产物 | 营销/下载页、账户中心 UI |
-| Pages Functions / Worker | 登录中介端点（`/desktop/*`、`/api/desktop/*`）+ 账户中心端点（`/auth/*`） | confidential OIDC 流程、回环 handoff、会话管理 |
-| KV `HANDOFF` | `handoff_code → {access_token, expires_in, refresh_token, sub, bound_challenge}`，TTL≈120s，一次性消费 | 登录回环交接（短 TTL + 绑 challenge） |
-| KV `SESSIONS` | `desktop_session_id → {refresh_token, sub}` | 桌面长会话（refresh_token 不出 Cloudflare） |
-| Secrets（Worker 加密环境变量） | `client_secret`（官网 confidential client）、IdP issuer/token 端点等 | 仅在 Worker，绝不下发到桌面 |
+| EdgeOne 资源 | 配置 | 作用 |
+|--------------|------|------|
+| Pages（**纯静态**） | React + TailwindCSS 构建产物（`website/dist/`） | 营销/下载页 + 账户中心 UI（SPA） |
+| `edgeone.json` | **仅** build 配置（buildCommand/installCommand/outputDirectory/nodeVersion）+ SPA rewrites（`/account`、`/download`、`/help` 等 → `/index.html`） | 构建与 SPA 前端路由回退；不含任何 Functions/KV/secret |
+
+> broker 状态（原 KV `HANDOFF`/`SESSIONS`）现落 Go 服务端 Postgres 两表 `broker_states`/`desktop_sessions`（[服务端 §10.3](./server-design.md#103-store-broker-两表--janitor)）；`client_secret` 与两把 AES 密钥走 Coolify env（[§7.3](#73-环境变量清单汇总coolify-注入启动-fail-fast)），EdgeOne 侧零 secret。
 
 **域名分工**：
 
 | 域名 | 承载 | 部署 |
 |------|------|------|
-| `https://example.com` | 官网（登录中介 + 营销/下载 + 账户中心） | Cloudflare Pages/Functions/Worker + KV |
-| `https://chat.example.com` | Lumen API/WS + 自动更新静态托管 | Go 服务端（Coolify + Traefik），不变 |
+| `https://example.com` | 官网**静态 SPA**（营销/下载 + 账户中心 UI） | EdgeOne Pages（纯静态，无 Functions/KV/secret） |
+| `https://chat.example.com` | Lumen API/WS + **登录 broker 9 端点** + 自动更新静态托管 | Go 服务端（Coolify + Traefik）=资源服务器 + broker |
 
-**IdP 回调登记**：在外部 OAuth2/OIDC 服务器登记官网回调地址（中介用 `https://example.com/desktop/callback`、账户中心用 `https://example.com/auth/callback`）；官网请求 scope `openid profile email offline_access`，并令 access_token 的 `aud` 含 `lumen-api`（= Go 服务端 `LUMEN_OAUTH_AUDIENCE`）；桌面回环 `redirect_uri` 仅允许 `http://127.0.0.1:<port>/...`，由 Worker 校验，不在 IdP 登记。
+**跨源关系**：`example.com`（SPA）与 `chat.example.com`（broker）**同 SITE、跨 ORIGIN**。会话 cookie 由 broker 以 `SameSite=Lax + HttpOnly + Secure + Path=/ + HOST-ONLY（无 Domain）` 下发；服务端仅对精确 `LUMEN_WEB_BASE_URL` 源发 CORS（带 credentials，永不用 `*`）；SPA XHR 用 `credentials:'include'`，`/auth/login`、`/auth/callback` 为顶层导航（[服务端 §10.5](./server-design.md#105-账户中心-cookie同-site-跨源)/[§10.6](./server-design.md#106-单点-cors-中间件)）。
+
+**IdP 回调登记**：在外部 OAuth2/OIDC 服务器登记**服务端域**的两个回调（`https://chat.example.com/desktop/callback`、`https://chat.example.com/auth/callback`，均由 `LUMEN_OAUTH_*_REDIRECT_URI` 配置）；broker 桌面流程请求 scope `openid profile email offline_access` 且令 access_token `aud` 含 `lumen-api`，账户中心流程请求 `openid profile email`（无 offline_access/无 aud）；桌面回环 `redirect_uri` 仅允许 `http://127.0.0.1:<port>/...`，由服务端 broker 校验，不在 IdP 登记。
 
 ---
 

@@ -31,6 +31,7 @@
 7. [部署（Coolify）](#7-部署coolify)
 8. [v0/v1 归属汇总](#8-v0v1-归属汇总)
 9. [v2（E2E）对服务端的影响简述](#9-v2e2e-对服务端的影响简述)
+10. [登录 broker（账户中心 + 桌面登录中介）](#10-登录-broker账户中心--桌面登录中介)
 
 ---
 
@@ -49,26 +50,40 @@
 lumen-server/
 ├── cmd/
 │   └── lumen-server/
-│       └── main.go              # 入口：装配、启动、优雅关闭
+│       └── main.go              # 入口：装配、启动、broker janitor、优雅关闭（已落地，见 §6.2）
 ├── internal/
 │   ├── config/                 # 环境变量加载与校验（fail-fast）
-│   │   └── config.go
+│   │   └── config.go           # 含 LUMEN_OAUTH_*/WEB_BASE_URL/两把 AES 密钥（§10.4）
 │   ├── auth/                   # JWKS 验签 + owner 判定 + claims→profile 映射
 │   │   ├── verifier.go         # keyfunc v3 + golang-jwt v5
 │   │   ├── owner.go            # ownerSet（配置态）
 │   │   ├── profile.go          # claims/userinfo → display_name/avatar_url
 │   │   └── middleware.go       # REST Bearer 中间件
+│   ├── secure/                 # 登录 broker 共享密码学原语（§10.2）
+│   │   ├── aesgcm.go           # AES-256-GCM Sealer：Seal/Open（cookie）+ Encrypt/Decrypt（at-rest bytea）
+│   │   └── token.go            # base64url / RandomToken / S256 / 常量时间比较（镜像 pkce.ts）
+│   ├── broker/                 # OIDC 登录 broker + 账户中心（EdgeOne Functions 的 Go 移植，§10.1）
+│   │   ├── broker.go           # Handler 装配 + Register(mux) 挂 9 路由
+│   │   ├── http.go             # broker 私有 JSON 信封（{error:{code,message}}，区别于 rest 信封）
+│   │   ├── oidc.go             # OIDC discovery/authorize/token/userinfo 客户端（confidential client）
+│   │   ├── pkce.go             # 回环 handoff verifier/S256、loopback redirect_uri 校验
+│   │   ├── loopback.go         # 127.0.0.1 回环 redirect_uri 白名单校验
+│   │   ├── session.go          # 账户中心两枚 cookie（lumen_session / lumen_auth_flow，§10.5）
+│   │   └── cors.go             # broker 独立 withCORS（仅供 Routes() 独立/测试用；生产用 rest 单点 CORS）
 │   ├── store/                  # PostgreSQL 封装（jackc/pgx/v5）
-│   │   ├── db.go               # 连接池、迁移
+│   │   ├── db.go               # 连接池、Store 接口、New/NewWithSealer（refresh sealer 注入）
+│   │   ├── migrate.go          # 建表 DDL（含 broker_states / desktop_sessions，§10.3）
 │   │   ├── users.go            # users upsert / 查询 / kick
-│   │   ├── channels.go         # channels CRUD
+│   │   ├── channels.go         # channels CRUD + 种子频道
 │   │   ├── messages.go         # messages 插入 / 游标分页
+│   │   ├── broker.go           # broker_states/desktop_sessions 读写 + 过期清理（§10.3）
 │   │   └── ids.go              # ULID 生成
 │   ├── rest/                   # REST handler（契约 §3）
-│   │   ├── router.go           # 路由表 /api/v1/*
+│   │   ├── router.go           # 路由表 /api/v1/* + 挂 broker.Register + 单点 CORS
+│   │   ├── cors.go             # 生产单点 withCORS（精确匹配 WEB_BASE_URL，§10.6）
 │   │   ├── envelope.go         # 统一响应信封 + 错误码映射
 │   │   ├── bootstrap.go        # GET /bootstrap
-│   │   ├── me.go               # GET /me
+│   │   ├── me.go               # GET /me（Bearer；区别于 broker 的 cookie /api/me）
 │   │   ├── channels.go         # GET/POST/PATCH/DELETE channels
 │   │   ├── messages.go         # GET messages（分页）
 │   │   ├── members.go          # GET members / POST kick
@@ -93,6 +108,8 @@ lumen-server/
 ```
 
 > `internal/` 防止被外部 import；`protocol/` 是所有层共享的纯数据定义（无业务逻辑），避免循环依赖。
+>
+> **架构变更（single-backend，权威）**：登录 broker 从 EdgeOne Pages Functions **整体移植到本 Go 服务端**（commit `82f344e` 落地 `internal/broker` + `internal/secure` + `store` broker 表 + `cmd/lumen-server/main.go`）。EdgeOne Pages 现为**纯静态**——只发布构建后的 React SPA（`website/dist/`），**无 Pages Functions、无 EdgeOne KV、无任何 secret**。因此本 Go 服务端不再只是"资源服务器"，而是**唯一后端 = 资源服务器（JWT/JWKS 验签，既有）+ OIDC 登录 broker（新增）**。`client_secret` 与 `refresh_token` **只**存在于服务端（Postgres；`refresh_token` 用独立密钥加密于列 `desktop_sessions.refresh_token_enc`）。详见 [§10](#10-登录-broker账户中心--桌面登录中介)。
 
 ### 1.3 依赖方向图
 
@@ -124,12 +141,14 @@ lumen-server/
 | 包 | 依赖 | 不依赖 |
 |----|------|--------|
 | `protocol` | 标准库 | 任何业务包（最底层） |
-| `config` | 标准库 | 业务包 |
-| `store` | `protocol`、`jackc/pgx/v5`、`oklog/ulid` | `rest`/`signaling`/`sfu`/`auth` |
-| `auth` | `protocol`、`config`、`keyfunc/v3`、`golang-jwt/v5`、`go-oidc/v3` | `rest`/`signaling`/`sfu` |
+| `config` | 标准库、`secure`（仅用 `DecodeKey` 校验 AES 密钥长度） | 其它业务包 |
+| `secure` | 标准库（`crypto/*`） | 任何业务包（与 `protocol` 同为底层） |
+| `store` | `protocol`、`secure`（refresh sealer）、`jackc/pgx/v5`、`oklog/ulid` | `rest`/`signaling`/`sfu`/`auth`/`broker` |
+| `auth` | `protocol`、`config`、`keyfunc/v3`、`golang-jwt/v5`、`go-oidc/v3` | `rest`/`signaling`/`sfu`/`broker` |
 | `sfu` | `protocol`、`pion/webrtc/v4`、`pion/ice/v4` | `rest`/`signaling`/`store`（解耦） |
-| `rest` | `protocol`、`auth`、`store`，及 `signaling.Broadcaster` 接口 | `sfu`（仅经接口间接触发） |
-| `signaling` | `protocol`、`auth`、`store`、`sfu` | `rest` |
+| `broker` | `config`、`store`、`secure`、`golang.org/x/oauth2`/`go-oidc/v3` | `rest`/`signaling`/`sfu`/`auth`（自管 handoff/cookie 鉴权，不用 Bearer 中间件） |
+| `rest` | `protocol`、`auth`、`store`、`config`，`signaling.Broadcaster` 接口，及 `*broker.Handler`（挂 `Register` + 单点 CORS） | `sfu`（仅经接口间接触发） |
+| `signaling` | `protocol`、`auth`、`store`、`sfu` | `rest`/`broker` |
 | `main` | 全部 | — |
 
 **关键解耦点**：
@@ -983,7 +1002,9 @@ func Open(ctx context.Context, dsn string) (*sql.DB, error) {
 >
 > **时间列**：契约 §5.2 时间列为 `TIMESTAMPTZ`。store 层结构体的 `created_at`/`updated_at`/`kicked_until` 用 `time.Time`（`kicked_until` 用 `sql.Null[time.Time]` 或 `*time.Time`）；DTO 组装时 `.UTC().Format(time.RFC3339)` 转线格式（契约 §7.4）。pgx 直接在 `time.Time` ↔ `TIMESTAMPTZ` 间扫描/绑定。`SetKickedUntil` 据此收 `time.Time` 入参（见 [§5.2](#52-store-接口与实现)），不经中间 string 解析（data-2）。
 
-迁移：启动时执行契约 §5.2 的全部建表/索引 DDL（`CREATE TABLE IF NOT EXISTS ...`、`CREATE INDEX IF NOT EXISTS ...`），幂等。DDL **原样照搬契约 §5.2**，不增删列。规模更大或需版本化迁移时，可引入 `golang-migrate`（PostgreSQL 驱动），本期启动期幂等 DDL 已够。
+迁移：启动时执行契约 §5.2 的全部建表/索引 DDL（`CREATE TABLE IF NOT EXISTS ...`、`CREATE INDEX IF NOT EXISTS ...`），幂等。三张业务表 DDL **原样照搬契约 §5.2**，不增删列。规模更大或需版本化迁移时，可引入 `golang-migrate`（PostgreSQL 驱动），本期启动期幂等 DDL 已够。
+
+> **broker 两表（架构变更新增，`internal/store/migrate.go`）**：同一 `schemaDDL` 追加两张登录 broker 表 `broker_states` 与 `desktop_sessions`（[§10.3](#103-store-broker-两表--janitor)），随迁移一并幂等创建。`store.New(db)` 建的 Store 其桌面会话方法会返回 `ErrNoSealer`；生产用 `store.NewWithSealer(db, refreshSealer)` 注入 refresh sealer 后，`desktop_sessions.refresh_token_enc` 才能加解密（[§6.2](#62-启动装配main)）。
 
 **首次部署种子频道 `seedDefaultChannels`（loop-1，[v0]）**：迁移 DDL 执行后，在同一启动流程内调用幂等的 `seedDefaultChannels(ctx, store)`——**当 `channels` 表为空时**插入一组默认频道：text『大厅』+ voice『开黑1』。用**确定性 ULID**（固定常量）+ `ON CONFLICT (id) DO NOTHING` 保证重复启动不重复插入。这样纯 v0 部署后 `bootstrap.channels` 即非空，`send_message`/`join_channel` 的 `GetChannel` 校验可通过，v0 开黑回路无需 [v1] 的 owner 频道 CRUD 即可走通。
 
@@ -1131,8 +1152,20 @@ func NewID() string {
 路由表（契约 §3.3）：
 
 ```go
-// internal/rest/router.go（要点）
-func NewRouter(v *auth.Verifier, owners *auth.OwnerSet, st store.Store, hub signaling.Broadcaster, cfg config.Config) http.Handler {
+// internal/rest/router.go（要点；已落地，改用 Deps 结构 + 挂 broker + 单点 CORS）
+type Deps struct {
+	Verifier *auth.Verifier
+	Owners   *auth.OwnerSet
+	Enricher *auth.ProfileEnricher    // 可选 userinfo 补齐
+	Store    store.Store
+	Rooms    *sfu.RoomManager         // bootstrap.voice_states 用
+	Hub      signaling.Broadcaster
+	Config   config.Config
+	Logger   *slog.Logger
+	Broker   *broker.Handler          // 挂账户中心 + 桌面 broker 9 路由（PUBLIC）；nil 则跳过
+}
+
+func NewRouter(d Deps) http.Handler {
 	mux := http.NewServeMux() // Go 1.22+ 支持方法+路径模式
 
 	// public
@@ -1140,27 +1173,35 @@ func NewRouter(v *auth.Verifier, owners *auth.OwnerSet, st store.Store, hub sign
 
 	// 自动更新文件静态托管（loop-6/desktop-5，[v1]）：公开免鉴权，仅 GET。
 	// 对外即 https://chat.example.com/updates/（与部署 FQDN 同域，复用 Traefik 证书）。
-	// latest.json 用 Cache-Control: no-cache + ETag；*.exe 文件名含版本号、长缓存不可变。
-	mux.Handle("GET /updates/", http.StripPrefix("/updates/", http.FileServer(http.Dir(cfg.UpdatesDir))))
+	mux.Handle("GET /updates/", http.StripPrefix("/updates/", http.FileServer(http.Dir(d.Config.UpdatesDir))))
 
 	// 成员（RequireAuth）
-	authed := func(h http.HandlerFunc) http.Handler { return auth.RequireAuth(v, writeErr, h) }
-	mux.Handle("GET /api/v1/bootstrap", authed(bootstrap(st, owners, hub /*ws_url*/, cfg)))
-	mux.Handle("GET /api/v1/me", authed(me(st, owners)))
-	mux.Handle("GET /api/v1/channels", authed(listChannels(st)))
-	mux.Handle("GET /api/v1/channels/{channelId}/messages", authed(listMessages(st, owners)))
-	mux.Handle("GET /api/v1/members", authed(listMembers(st, owners)))
+	authed := func(h http.HandlerFunc) http.Handler { return auth.RequireAuth(d.Verifier, writeErr, h) }
+	mux.Handle("GET /api/v1/bootstrap", authed(bootstrap(d.Store, d.Owners, d.Enricher, d.Rooms, d.Config)))
+	mux.Handle("GET /api/v1/me", authed(me(d.Store, d.Owners, d.Enricher))) // Bearer 版 me
+	mux.Handle("GET /api/v1/channels", authed(listChannels(d.Store)))
+	mux.Handle("GET /api/v1/channels/{channelId}/messages", authed(listMessages(d.Store, d.Owners)))
+	mux.Handle("GET /api/v1/members", authed(listMembers(d.Store, d.Owners)))
 
 	// owner（RequireAuth → RequireOwner）
 	owner := func(h http.HandlerFunc) http.Handler {
-		return auth.RequireAuth(v, writeErr, auth.RequireOwner(owners, writeErr, h))
+		return auth.RequireAuth(d.Verifier, writeErr, auth.RequireOwner(d.Owners, writeErr, h))
 	}
-	mux.Handle("POST /api/v1/channels", owner(createChannel(st, hub)))            // [v1]
-	mux.Handle("PATCH /api/v1/channels/{channelId}", owner(updateChannel(st, hub))) // [v1]
-	mux.Handle("DELETE /api/v1/channels/{channelId}", owner(deleteChannel(st, hub))) // [v1]
-	mux.Handle("POST /api/v1/members/{userId}/kick", owner(kickMember(st, hub)))   // [v1]
+	mux.Handle("POST /api/v1/channels", owner(createChannel(d.Store, d.Hub)))            // [v1]
+	mux.Handle("PATCH /api/v1/channels/{channelId}", owner(updateChannel(d.Store, d.Hub))) // [v1]
+	mux.Handle("DELETE /api/v1/channels/{channelId}", owner(deleteChannel(d.Store, d.Hub))) // [v1]
+	mux.Handle("POST /api/v1/members/{userId}/kick", owner(kickMember(d.Store, d.Owners, d.Hub))) // [v1]
 
-	return withRecover(withLogging(mux)) // panic 恢复 + 访问日志中间件
+	// 登录 broker（decision 10）：挂在同一 root mux 上作 PUBLIC 路由（无 RequireAuth；
+	// broker 自管 handoff/cookie 鉴权）。broker 的 cookie 版 GET /api/me 与上面 Bearer 版
+	// GET /api/v1/me 路径不同、互不冲突。
+	if d.Broker != nil {
+		d.Broker.Register(mux)
+	}
+
+	// 单点 CORS（decision 3）：精确匹配 d.Config.WebBaseURL，包住整个 mux（含 broker）；
+	// 置于 recover/logging 之外，使 preflight OPTIONS 与 Vary: Origin 恒设。
+	return withCORS(d.Config.WebBaseURL, withRecover(d.Logger, withLogging(d.Logger, mux)))
 }
 ```
 
@@ -1237,7 +1278,7 @@ WS 错误复用同表（`error.data.code` / `auth_error.data.code`），见 [§3
 | `LUMEN_OAUTH_ISSUER` | OIDC issuer（校验 `iss`） | `https://auth.example.com/realms/lumen` | ✓ | v0 |
 | `LUMEN_OAUTH_JWKS_URL` | JWKS 端点（本地验签公钥源） | `https://auth.example.com/realms/lumen/protocol/openid-connect/certs` | ✓ | v0 |
 | `LUMEN_OAUTH_USERINFO_URL` | userinfo 端点（资料补齐）；**可选**，缺省由 OIDC discovery 自 issuer 推导 | `https://auth.example.com/realms/lumen/protocol/openid-connect/userinfo` | ✗ | v0 |
-| `LUMEN_OAUTH_AUDIENCE` | 期望 `aud`（验 access_token；OAuth client_id 由官网 Worker 持有，服务端只验 aud、不需要 client_id） | `lumen-api` | ✓ | v0 |
+| `LUMEN_OAUTH_AUDIENCE` | 期望 `aud`（资源侧验 access_token；broker 侧另持 `LUMEN_OAUTH_CLIENT_ID`/`_SECRET`，见下方 broker 段） | `lumen-api` | ✓ | v0 |
 | `LUMEN_OWNER_SUBJECTS` | owner sub 列表（逗号分隔） | `sub-abc,sub-def` | ✓ | v0 |
 | `LUMEN_LISTEN_ADDR` | HTTP/WS 监听地址（容器内必须 `0.0.0.0`） | `0.0.0.0:8080` | ✓ | v0 |
 | `LUMEN_DATABASE_URL` | PostgreSQL 连接串（DSN） | `postgres://lumen:***@lumen-db:5432/lumen?sslmode=disable` | ✓ | v0 |
@@ -1246,9 +1287,21 @@ WS 错误复用同表（`error.data.code` / `auth_error.data.code`），见 [§3
 | `LUMEN_PUBLIC_WS_URL` | 对外 WS 地址（bootstrap.ws_url）；缺省由 Host 头推导 | `wss://chat.example.com/ws` | ✗ | v0 |
 | `LUMEN_UPDATES_DIR` | 自动更新文件静态托管目录（`GET /updates/`） | `/app/updates` | ✗（默认 `/app/updates`） | v1 |
 | `LUMEN_LOG_LEVEL` | 日志级别 `debug/info/warn/error` | `info` | ✗（默认 info） | v0 |
+| **登录 broker（[§10](#10-登录-broker账户中心--桌面登录中介)，随 broker 移入服务端而新增）** | | | | |
+| `LUMEN_OAUTH_CLIENT_ID` | confidential OIDC client id（broker 用；资源验签仍只用 aud） | `lumen-web` | ✓ | v0 |
+| `LUMEN_OAUTH_CLIENT_SECRET` | confidential client_secret（**secret，仅服务端持有，永不下发/记日志**） | `***` | ✓ | v0 |
+| `LUMEN_OAUTH_AUTHORIZE_URL` | IdP authorize 端点；**可选**，缺省由 discovery 推导 | `https://auth.example.com/.../auth` | ✗ | v0 |
+| `LUMEN_OAUTH_TOKEN_URL` | IdP token 端点；**可选**，缺省由 discovery 推导 | `https://auth.example.com/.../token` | ✗ | v0 |
+| `LUMEN_OAUTH_DESKTOP_REDIRECT_URI` | 桌面登录 IdP 回调（登记在 IdP） | `https://chat.example.com/desktop/callback` | ✓ | v0 |
+| `LUMEN_OAUTH_WEB_REDIRECT_URI` | 账户中心 IdP 回调（登记在 IdP） | `https://chat.example.com/auth/callback` | ✓ | v0 |
+| `LUMEN_WEB_BASE_URL` | SPA 官网源（CORS 精确白名单 + `/account` 重定向目标） | `https://example.com` | ✓ | v0 |
+| `LUMEN_SESSION_ENC_KEY` | 账户中心 cookie 封装密钥（base64 解码须 32 字节） | `<base64 32B>` | ✓ | v0 |
+| `LUMEN_REFRESH_ENC_KEY` | `refresh_token` at-rest 加密密钥（base64 32 字节；**须与 SESSION_ENC_KEY 不同**） | `<base64 32B>` | ✓ | v0 |
+
+> `LUMEN_OAUTH_USERINFO_URL` 现由 broker 与资料补齐**共用**：缺省时 broker 的 OIDC 客户端经 discovery 推导，两把 AES 密钥必须 base64 解码为恰好 32 字节且**彼此不同**（decision 2），`Load` 与其它必填项一样聚合报错、fail-fast。
 
 ```go
-// internal/config/config.go
+// internal/config/config.go（已落地；broker 字段与两把密钥）
 type Config struct {
 	OAuthIssuer, OAuthJWKSURL, OAuthUserinfoURL string
 	OAuthAudience                               string
@@ -1256,7 +1309,25 @@ type Config struct {
 	ListenAddr, DatabaseURL, PublicIP           string
 	WebRTCUDPPort                               int
 	PublicWSURL, UpdatesDir, LogLevel           string
+
+	// --- 登录 broker（EdgeOne Functions 的 Go 移植）---
+	OAuthClientID        string
+	OAuthClientSecret    string // secret：永不记日志/回显
+	OAuthAuthorizeURL    string // 可选；空则 discovery 推导
+	OAuthTokenURL        string // 可选；空则 discovery 推导
+	OAuthDesktopRedirect string // = https://chat.example.com/desktop/callback
+	OAuthWebRedirect     string // = https://chat.example.com/auth/callback
+	WebBaseURL           string // = https://example.com（CORS 白名单）
+
+	// 解码后的 32 字节 AES-256-GCM 密钥（Load 校验；两把必须不同）。
+	// sessionEncKey 封装账户中心两枚 cookie；refreshEncKey 加密 refresh_token at-rest。
+	sessionEncKey []byte
+	refreshEncKey []byte
 }
+
+// SessionEncKey/RefreshEncKey 返回密钥的防御性拷贝。
+func (c Config) SessionEncKey() []byte { return cloneKey(c.sessionEncKey) }
+func (c Config) RefreshEncKey() []byte { return cloneKey(c.refreshEncKey) }
 
 // Load 从环境读取并校验必填项；缺失返回聚合错误（fail-fast）。
 func Load() (Config, error) {
@@ -1276,14 +1347,31 @@ func Load() (Config, error) {
 		DatabaseURL:      get("LUMEN_DATABASE_URL", true),
 		PublicIP:         get("LUMEN_PUBLIC_IP", true),
 		PublicWSURL:      get("LUMEN_PUBLIC_WS_URL", false),
-		UpdatesDir:       orDefault(get("LUMEN_UPDATES_DIR", false), "/app/updates"), // 自动更新文件托管目录
+		UpdatesDir:       orDefault(get("LUMEN_UPDATES_DIR", false), "/app/updates"),
 		LogLevel:         orDefault(get("LUMEN_LOG_LEVEL", false), "info"),
+
+		// broker（confidential client + 回环/账户中心回调 + SPA 源）
+		OAuthClientID:        get("LUMEN_OAUTH_CLIENT_ID", true),
+		OAuthClientSecret:    get("LUMEN_OAUTH_CLIENT_SECRET", true),
+		OAuthAuthorizeURL:    get("LUMEN_OAUTH_AUTHORIZE_URL", false),
+		OAuthTokenURL:        get("LUMEN_OAUTH_TOKEN_URL", false),
+		OAuthDesktopRedirect: get("LUMEN_OAUTH_DESKTOP_REDIRECT_URI", true),
+		OAuthWebRedirect:     get("LUMEN_OAUTH_WEB_REDIRECT_URI", true),
+		WebBaseURL:           get("LUMEN_WEB_BASE_URL", true),
 	}
 	port, err := strconv.Atoi(get("LUMEN_WEBRTC_UDP_PORT", true))
 	if err != nil || port < 1 || port > 65535 {
 		miss = append(miss, "LUMEN_WEBRTC_UDP_PORT(无效)")
 	}
 	c.WebRTCUDPPort = port
+
+	// 两把 AES 密钥：必填、base64 解码须恰好 32 字节、且彼此不同（decision 2）。
+	c.sessionEncKey = decodeAESKey(get("LUMEN_SESSION_ENC_KEY", true), "LUMEN_SESSION_ENC_KEY", &miss)
+	c.refreshEncKey = decodeAESKey(get("LUMEN_REFRESH_ENC_KEY", true), "LUMEN_REFRESH_ENC_KEY", &miss)
+	if c.sessionEncKey != nil && c.refreshEncKey != nil && bytesEqual(c.sessionEncKey, c.refreshEncKey) {
+		miss = append(miss, "LUMEN_REFRESH_ENC_KEY(必须与 LUMEN_SESSION_ENC_KEY 不同)")
+	}
+
 	if len(miss) > 0 {
 		return Config{}, fmt.Errorf("缺失/无效环境变量: %s", strings.Join(miss, ", "))
 	}
@@ -1293,50 +1381,82 @@ func Load() (Config, error) {
 
 ### 6.2 启动装配（main）
 
+> **`cmd/lumen-server/main.go` 现已落地**（commit `82f344e`；此前该目录仅有 `.gitkeep`）。真实实现把装配放在返回 `error` 的 `run()` 里（便于 defer 清理与测试），`main` 仅调用它并按需 `os.Exit(1)`；下列骨架与真实代码一致，新增 **broker 装配**、**refresh sealer**、**broker janitor**（60s 清理过期 broker_states）与**优雅关闭**（`srv.Shutdown` + `rooms.CloseAllRooms`）。
+
 ```go
-// cmd/lumen-server/main.go（装配顺序）
+// cmd/lumen-server/main.go（装配顺序，已落地）
 func main() {
+	if err := run(); err != nil {
+		slog.Error("server exited with error", "err", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	// 1) Config（fail-fast）：任何缺失/非法键在任何 I/O 前中止。
 	cfg, err := config.Load()
-	if err != nil { log.Fatalf("配置错误: %v", err) }     // fail-fast
+	if err != nil { return err }
+	logger := newLogger(cfg.LogLevel); slog.SetDefault(logger)
 
-	logger := newLogger(cfg.LogLevel)                     // slog
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
+	// rootCtx 在 SIGINT/SIGTERM 时取消：约束后台 goroutine（JWKS 刷新、broker janitor）并触发优雅关闭。
+	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
-	// 1) store
-	db, err := store.Open(ctx, cfg.DatabaseURL); fatal(err)
+	// 2) store：连接池 + 迁移 + 种子（受 startupTimeout 约束）。
+	startCtx, cancelStart := context.WithTimeout(rootCtx, startupTimeout); defer cancelStart()
+	db, err := store.Open(startCtx, cfg.DatabaseURL); if err != nil { return err }
 	defer db.Close()
-	st := store.New(db); fatal(st.Migrate())              // 执行契约 §5.2 DDL（幂等）
-	fatal(st.SeedDefaultChannels(ctx))                    // [v0] 首部署种子频道（空表才插，幂等，§5.1 loop-1）
+	// refresh_token at-rest sealer 用独立的 LUMEN_REFRESH_ENC_KEY（decision 2）。
+	refreshSealer, err := secure.NewSealer(cfg.RefreshEncKey()); if err != nil { return err }
+	st := store.NewWithSealer(db, refreshSealer)          // 注入 sealer → desktop_sessions.refresh_token_enc 加密
+	if err := st.Migrate(startCtx); err != nil { return err }        // 建表 DDL（含 broker 两表，幂等）
+	if err := st.SeedDefaultChannels(startCtx); err != nil { return err } // [v0] 首部署种子频道
 
-	// 2) auth
-	verifier, err := auth.NewVerifier(ctx, cfg.OAuthJWKSURL, cfg.OAuthIssuer, cfg.OAuthAudience); fatal(err)
+	// 3) auth：JWKS 验签器（后台刷新绑 rootCtx）、owner 集、可选 userinfo enricher。
+	verifier, err := auth.NewVerifier(rootCtx, cfg.OAuthJWKSURL, cfg.OAuthIssuer, cfg.OAuthAudience); if err != nil { return err }
 	owners := auth.NewOwnerSet(cfg.OwnerSubjects)
+	enricher, err := auth.NewProfileEnricher(startCtx, cfg.OAuthIssuer, cfg.OAuthUserinfoURL)
+	if err != nil { logger.Warn("userinfo enricher 初始化失败，降级为仅凭 claims", "err", err); enricher = nil }
 
-	// 3) sfu（UDPMux 必须在任何 PC 之前）
-	rtcAPI, err := sfu.NewAPI(cfg.WebRTCUDPPort, cfg.PublicIP); fatal(err)
-	roomMgr := sfu.NewRoomManager(rtcAPI)                 // sink 稍后由 hub 注入
+	// 4) sfu + signaling hub（SetSink 交叉注入，打破 sfu↔signaling 循环）。
+	api, err := sfu.NewAPI(cfg.WebRTCUDPPort, cfg.PublicIP); if err != nil { return err }
+	rooms := sfu.NewRoomManager(api)
+	hub := signaling.NewHub(st, verifier, owners, rooms, enricher, logger)
+	rooms.SetSink(hub)
 
-	// 4) signaling（持有 store/verifier/owners/roomMgr）
-	hub := signaling.NewHub(st, verifier, owners, roomMgr)
-	roomMgr.SetSink(hub)                                  // 回调注入，打通 SFU→信令广播
+	// 5) 登录 broker（decision 10）：NewHandler 内做 discovery 回退 + 用 LUMEN_SESSION_ENC_KEY 建 cookie sealer。
+	brk, err := broker.NewHandler(startCtx, cfg, st, logger); if err != nil { return err }
 
-	// 5) rest（hub 作为 Broadcaster 注入）
-	router := rest.NewRouter(verifier, owners, st, hub, cfg)
-	router = signaling.Mount(router, hub)                 // 挂 GET /ws 升级处理
+	// 6) Router：REST（+ broker.Register）置于单点 CORS 之内；再由 signaling.Mount 包住以升级 GET /ws。
+	router := rest.NewRouter(rest.Deps{
+		Verifier: verifier, Owners: owners, Enricher: enricher, Store: st,
+		Rooms: rooms, Hub: hub, Config: cfg, Logger: logger, Broker: brk,
+	})
+	handler := signaling.Mount(router, hub)
 
-	srv := &http.Server{Addr: cfg.ListenAddr, Handler: router}
+	// 7) broker janitor：每 60s 回收过期 broker_states（decision 4）。
+	go runJanitor(rootCtx, st, logger)
+
+	// 8) HTTP server + 优雅关闭。
+	srv := &http.Server{Addr: cfg.ListenAddr, Handler: handler, ReadHeaderTimeout: readHeaderTimeout}
+	serveErr := make(chan error, 1)
 	go func() {
 		logger.Info("listening", "addr", cfg.ListenAddr, "udp", cfg.WebRTCUDPPort)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("HTTP 服务退出: %v", err)
-		}
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) { serveErr <- err; return }
+		serveErr <- nil
 	}()
-
-	<-ctx.Done()                                          // 收到 SIGTERM/Ctrl-C
-	shutdown(srv, hub, roomMgr, db)                       // 优雅关闭，见 §6.4
+	select {
+	case <-rootCtx.Done(): logger.Info("shutdown signal received, draining")
+	case err := <-serveErr: return err
+	}
+	shutCtx, cancelShut := context.WithTimeout(context.Background(), shutdownTimeout); defer cancelShut()
+	if err := srv.Shutdown(shutCtx); err != nil { rooms.CloseAllRooms(); return err }
+	rooms.CloseAllRooms()
+	return nil
 }
 ```
+
+> 常量：`startupTimeout=30s`（约束一次性启动 I/O：DB open/migrate/seed/discovery）、`janitorInterval=60s`、`shutdownTimeout=15s`、`readHeaderTimeout=10s`（防 slow-loris）。
 
 ### 6.3 并发模型
 
@@ -1353,16 +1473,15 @@ func main() {
 
 ### 6.4 优雅关闭
 
+真实 `run()` 内联优雅关闭（[§6.2](#62-启动装配main)）：`rootCtx`（`signal.NotifyContext(SIGINT/SIGTERM)`）被取消后，`shutdownTimeout=15s` 内 `srv.Shutdown` 停收新 HTTP/WS、等在途完成，再 `rooms.CloseAllRooms()` 关闭全部 PeerConnection（`pc.Close` 幂等）并释放 UDPMux；`db.Close()` 与 `stop()` 经 `defer` 回收。`rootCtx` 取消会连带停掉两个后台 goroutine：**keyfunc JWKS 刷新** 与 **broker janitor**（`runJanitor` 收到 `ctx.Done()` 即返回，decision 4）。
+
 ```go
-func shutdown(srv *http.Server, hub *signaling.Hub, rooms *sfu.RoomManager, db *sql.DB) {
-	to, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(to)        // 1) 停止接收新 HTTP/WS，等在途请求完成
-	hub.CloseAll()              // 2) 关闭所有 WS 连接（发关闭帧）
-	rooms.CloseAllRooms()       // 3) 关闭所有 PeerConnection（pc.Close 幂等）、释放 UDPMux
-	_ = db.Close()              // 4) 关 DB 连接池
-	// 5) main 中 defer cancel() 取消 ctx → keyfunc 刷新 goroutine 退出
-}
+// run() 内（要点）：收到信号后
+shutCtx, cancelShut := context.WithTimeout(context.Background(), shutdownTimeout) // 15s
+defer cancelShut()
+if err := srv.Shutdown(shutCtx); err != nil { rooms.CloseAllRooms(); return err }
+rooms.CloseAllRooms()  // 关闭所有 PeerConnection、释放 UDPMux
+// defer: db.Close()（连接池）→ stop()（取消 rootCtx → JWKS 刷新 + broker janitor 退出）
 ```
 
 > 用 Ports Mappings 部署会**失去 Rolling Updates**（调研 02 §8）：重新部署有短暂中断，语音会重连——可接受（小规模开黑场景）。
@@ -1380,8 +1499,8 @@ func shutdown(srv *http.Server, hub *signaling.Hub, rooms *sfu.RoomManager, db *
 
 | 项 | 措施 |
 |----|------|
-| 无明文 secret | 服务端不持有 client_secret / refresh_token（契约 §2.6）；仅配置非敏感 URL/ID（`client_secret` 仅存于官网 Cloudflare Worker，`refresh_token` 不出 Cloudflare，均不下发到桌面） |
-| 无需 CORS | 账户中心（官网 `example.com`）不调 Lumen API，REST/WS 调用方仅桌面客户端（非浏览器同源策略约束），故服务端**无需为官网域名加 CORS**；如未来网页要直接调 API，再按需加白名单（详见 [./web-design.md](./web-design.md)） |
+| secret 集中于服务端 | **架构变更后**：`client_secret` 与 `refresh_token` **只**存在于本 Go 服务端（decision 2）——`client_secret` 走 `LUMEN_OAUTH_CLIENT_SECRET`（永不记日志/回显），`refresh_token` 仅存 `desktop_sessions.refresh_token_enc`（用独立的 `LUMEN_REFRESH_ENC_KEY` AES-256-GCM 加密于列，[§10.3](#103-store-broker-两表--janitor)）；桌面只持不透明 `desktop_session_id`。access_token 不落库（仅在 handoff 行的 ~120s 窗口内经 `broker_states` 中转）。EdgeOne 侧**零 secret**（纯静态 SPA）。 |
+| CORS（精确白名单） | SPA 在 `example.com` **跨源**调本服务端 broker（`chat.example.com`）；二者**同 SITE**（同一注册域），故：会话 cookie 用 `SameSite=Lax + HttpOnly + Secure + Path=/ + HOST-ONLY（无 Domain）`；服务端**仅**对精确等于 `LUMEN_WEB_BASE_URL` 的 Origin 发 CORS（带 credentials），永不用 `*`，恒发 `Vary: Origin`（[§10.6](#106-单点-cors-中间件)）。SPA XHR 用 `credentials:'include'`；`/auth/login`、`/auth/callback` 为顶层导航（非 XHR）。桌面客户端非浏览器、不受同源策略约束。 |
 | JWT 验签红线 | 强制 `RS256`（防 alg 混淆/none）、校验 iss/aud/exp、JWKS 必须 HTTPS（调研 §4.1） |
 | token 不入日志/URL | WS token 仅首帧 body，不进 query（契约 §2.4）；日志脱敏 |
 | 输入校验 | content ≤4000 去空判空、channel name 1~64、type∈{text,voice}、limit 钳制 1~100、SDP/candidate 反序列化失败即拒 |
@@ -1399,7 +1518,7 @@ func shutdown(srv *http.Server, hub *signaling.Hub, rooms *sfu.RoomManager, db *
 
 实现调研 02。核心：HTTP/WS 走 Traefik（终结 TLS、提供 WSS）；WebRTC UDP 裸端口映射绕过 Traefik。
 
-> **官网与服务端分离部署**：官网（账户中心 / 桌面登录中介）为**独立的 Cloudflare Pages 部署**（`example.com`），与本 Go 服务端（`chat.example.com`，Coolify）完全分离；本服务端**无新增端口/依赖**（不因官网中介而引入任何 Cloudflare/IdP 直连或额外服务）。官网部署细节见 [./web-design.md](./web-design.md)。
+> **官网静态化 + broker 内置**：官网为**独立的 EdgeOne Pages 纯静态部署**（`example.com`，只发布 `website/dist/`，无 Functions/无 KV/无 secret）。登录 broker 已**内置进本 Go 服务端**（`chat.example.com`，[§10](#10-登录-broker账户中心--桌面登录中介)）：与 `/api/v1/*` **共用同一 HTTP 服务与端口**（8080 → Traefik），**无新增对外端口**；新增的运行期依赖是既有 Postgres（broker 两表）与到 IdP 的 authorize/token/userinfo/discovery 出站调用（confidential client）。服务端现对精确 `LUMEN_WEB_BASE_URL` 源发 CORS（供 SPA 跨源账户中心，[§10.6](#106-单点-cors-中间件)）。SPA 部署细节见 [./web-design.md](./web-design.md)。
 
 ### 7.1 数据流总览
 
@@ -1540,3 +1659,125 @@ ENTRYPOINT ["/app/lumen-server"]
 - **不影响**：REST、store、DDL、鉴权、配置均无需变更。
 - **上线前确认**：目标 Wails webview（Chromium）版本支持 `RTCRtpScriptTransform`（Insertable Streams）——属客户端约束，服务端仅需就绪 `e2e_key_update` 转发。
 - 详细密钥分发/轮换 epoch/与重协商交互将在独立 `docs/design/e2e-design.md` 展开，本文不深入。
+
+---
+
+## 10. 登录 broker（账户中心 + 桌面登录中介）
+
+> **架构来源（权威，用户已决定）**：登录 broker 从 EdgeOne Pages Functions **整体移植进本 Go 服务端**（commit `82f344e`），落地为 `internal/broker` + `internal/secure` + `store` broker 两表 + `cmd/lumen-server/main.go` 装配。EdgeOne Pages 自此**纯静态**（只发布 `website/dist/` 的 React SPA，无 Functions、无 KV、无 secret）。本 Go 服务端是**唯一后端 = 资源服务器（[§2](#2-鉴权网关auth) 既有）+ OIDC 登录 broker（本节新增）**。broker 是既有 EdgeOne TypeScript Functions 的 **1:1 Go 移植**——`internal/secure` 镜像 `_lib/pkce.ts` + `_lib/session.ts`，`internal/broker` 镜像各 handler，行为逐字节等价，仅**宿主从 `example.com` 改为 `chat.example.com`**。
+
+### 10.1 broker 包与 9 个路由
+
+`broker.Handler`（构造后不可变、并发安全）经 `Register(mux)` 把 **9 个端点**挂到 root mux（与 `/api/v1/*` 共享），全部 **PUBLIC**（无 `RequireAuth`；broker 自管 handoff 码与封装 cookie 鉴权）：
+
+| # | 方法+路径 | 类别 | 职责 | 镜像自 |
+|---|-----------|------|------|--------|
+| 1 | `GET /desktop/login` | 桌面 | 校验回环 `redirect_uri`(`http://127.0.0.1:<port>/…`)/`state`/`challenge`，暂存 login_ctx（PKCE），302 到 IdP `/authorize`（scope 含 `offline_access`、`aud=lumen-api`） | `desktop/login.ts` |
+| 2 | `GET /desktop/callback` | 桌面 | 用 `code` 换 token，暂存**一次性** handoff（绑 desktop challenge），302 回回环带 `handoff_code + state`；access_token 绝不进 URL；设 `Referrer-Policy: no-referrer` | `desktop/callback.ts` |
+| 3 | `POST /api/desktop/exchange` | 桌面 | `handoff_code + handoff_verifier` 换 `{access_token, expires_in, desktop_session_id, profile}`，校验 `S256(verifier)==bound_challenge`（常量时间）+ 一次性消费 | `exchange.ts` |
+| 4 | `POST /api/desktop/refresh` | 桌面 | 用 `desktop_session_id` 刷新 access_token；IdP 返回新 refresh_token 则轮换入库；IdP 拒绝则删会话回 `401 SESSION_INVALID` | `refresh.ts` |
+| 5 | `POST /api/desktop/logout` | 桌面 | 删 `desktop_session_id`（幂等），`204` | `logout.ts` |
+| 6 | `GET /auth/login` | 账户中心 | 用封装短时 cookie（`lumen_auth_flow`）暂存 PKCE flow，302 到 IdP（scope **无** `offline_access`、**无** `aud=lumen-api`——账户中心不调 Lumen API） | `auth/login.ts` |
+| 7 | `GET /auth/callback` | 账户中心 | 校验 state、换 code、建封装会话 cookie（`lumen_session`），302 到 `WEB_BASE_URL/account`；`Referrer-Policy: no-referrer` | `auth/callback.ts` |
+| 8 | `POST /auth/logout` | 账户中心 | 清 `lumen_session` cookie，`204`（无服务端态可删） | `auth/logout.ts` |
+| 9 | `GET /api/me` | 账户中心 | 从封装 `lumen_session` cookie 回 `{display_name, avatar_url}`，否则 `401 UNAUTHENTICATED`；**cookie 版**，区别于 Bearer 版 `GET /api/v1/me`（[§5.4](#54-rest-handler-与契约对应)） | `api/me.ts` |
+
+> **`/api/download/latest` 代理已删除**：SPA 直接 `fetch chat.example.com/updates/latest.json`（[§7.7](#77-自动更新文件托管lv1) 已有的静态托管），不再经 broker 代理。
+>
+> **桌面 handoff 线协议逐字节保留**：端点 1~5 的入参/回执/绑定/错误码全部不变，唯一变化是**宿主域名 `example.com → chat.example.com`**。未来 Windows 客户端改动 = **仅 base URL**（`LUMEN_WEB_BASE_URL`/相关基址由 `example.com` 改指 `chat.example.com`）。
+>
+> **broker 私有 JSON 信封**（`internal/broker/http.go`，镜像 `_lib/http.ts`）：`{ "error": { "code", "message" } }`，与 rest 的 `{success,data,error}` 信封（[§5.4](#54-错误码映射)）**不同**；成功端点回裸 body。响应恒 `Cache-Control: no-store`，绝不回显 token/secret/堆栈。
+
+`Register` 只挂路由、**不加任何中间件**（CORS 在 root 层统一加一次，见 [§10.6](#106-单点-cors-中间件)），以便与 `/api/v1/*` 共享 root mux。另有 `Routes()` 返回自带 broker 私有 `withCORS` 的独立 `http.Handler`——**仅供测试/独立运行**，生产路径不用。
+
+### 10.2 internal/secure：共享密码学原语
+
+`internal/secure` 是与 `protocol` 同层的底层包（仅依赖 `crypto/*`），把 EdgeOne `_lib/pkce.ts` + `_lib/session.ts` 逐一移植，令 Go 与（并行留存的）TS 行为等价：
+
+- **token.go**：`Base64URLEncode/Decode`（RFC 7636 无填充）、`IsBase64URL`、`RandomToken(n)`（仅 `crypto/rand`）、`S256(verifier)=base64url(SHA256)`、`ConstantTimeEqualString`。常量：`DefaultTokenBytes=32`（verifier/state/handoff_code）、`SessionIDBytes=48`（desktop_session_id）。
+- **aesgcm.go**：`Sealer`（固定 32 字节 AES-256-GCM 密钥，不可变、并发安全）。两组用法：
+  - `Seal/Open`（返回 `base64url(iv).base64url(ct)` 字符串）——封装账户中心两枚 cookie（用 `sessionEncKey`）。
+  - `Encrypt/Decrypt`（返回 `iv||ct||tag` 的 `[]byte`）——`refresh_token` at-rest 存 bytea（用 `refreshEncKey`）。
+  - `NewSealer(key)` 校验 key 长度；`DecodeKey` 供 config 校验 base64→32 字节。
+
+两把密钥来自 [§6.1](#61-配置全部环境变量) 的 `LUMEN_SESSION_ENC_KEY` 与 `LUMEN_REFRESH_ENC_KEY`，config 层强制**二者不同**（decision 2）。
+
+### 10.3 store broker 两表 + janitor
+
+`internal/store/migrate.go` 的 `schemaDDL` 在三张业务表后追加：
+
+```sql
+-- broker_states：两种单次消费的 kind，按不透明 token 主键。
+--   login_ctx：/desktop/login 暂存的 oidc verifier/state/challenge，/desktop/callback 消费一次（TTL~600s）
+--   handoff  ：/desktop/callback 暂存的 token 集 + bound_challenge，/api/desktop/exchange 消费一次（TTL~120s）
+-- 每次读都 WHERE expires_at > now()；消费用事务内 DELETE ... RETURNING（无 TOCTOU/无重放）。
+-- access_token 只在 handoff 行的 ~120s 窗口内存在，别处不落库。
+CREATE TABLE IF NOT EXISTS broker_states (
+    key TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('login_ctx','handoff')),
+    payload JSONB NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_broker_states_expires_at ON broker_states (expires_at);
+
+-- desktop_sessions：长会话。refresh_token 以 AES-256-GCM 加密存 bytea（LUMEN_REFRESH_ENC_KEY）；
+-- access_token 不落此表。无 expires_at：会话存活至 logout 或 IdP 刷新被拒时删除。
+CREATE TABLE IF NOT EXISTS desktop_sessions (
+    id TEXT PRIMARY KEY,
+    refresh_token_enc BYTEA NOT NULL,
+    sub TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL
+);
+```
+
+`Store` 接口新增 broker 方法（`internal/store/broker.go` 实现）：
+
+| 方法 | 语义 |
+|------|------|
+| `PutLoginContext(ctx, oidcState, LoginContext)` | upsert login_ctx（TTL 600s） |
+| `TakeLoginContext(ctx, oidcState) (LoginContext, error)` | 事务内 `DELETE ... RETURNING` 一次性取（过期/缺失 → `ErrNotFound`） |
+| `PutHandoff(ctx, handoffCode, Handoff)` | upsert handoff（TTL 120s；payload 含 access_token/refresh_token/sub/bound_challenge/profile） |
+| `ConsumeHandoff(ctx, handoffCode) (Handoff, error)` | 一次性消费（映射 `HANDOFF_NOT_FOUND`） |
+| `DeleteExpiredBrokerStates(ctx) (int64, error)` | janitor 清过期行，回删除条数 |
+| `PutSession(ctx, DesktopSession)` | upsert 桌面会话；用 refresh sealer 加密 `refresh_token_enc`（无 sealer → `ErrNoSealer`） |
+| `GetSession(ctx, id) (DesktopSession, error)` | 读并解密 refresh_token |
+| `DeleteSession(ctx, id) error` | 删会话（幂等，缺失即 no-op） |
+
+**janitor（decision 4，`cmd/lumen-server/main.go` `runJanitor`）**：每 `janitorInterval=60s` 调 `DeleteExpiredBrokerStates` 回收过期 login_ctx/handoff（读路径已用 `expires_at > now()` 屏蔽过期行，janitor 仅回收空间）；`rootCtx` 取消即退出，单次清理失败仅记日志、循环继续。`desktop_sessions` 无 TTL、不被 janitor 清理。
+
+### 10.4 broker 装配（NewHandler）
+
+`broker.NewHandler(ctx, cfg, store, logger)`：
+
+1. 用 `cfg.SessionEncKey()` 建 cookie sealer（封装 `lumen_session`/`lumen_auth_flow`）。
+2. 建 OIDC 客户端：`authorize/token/userinfo` URL 为空时经 **OIDC discovery**（`.well-known/openid-configuration`，自 `LUMEN_OAUTH_ISSUER`）推导；持有 `client_id/client_secret/audience`。
+3. store 必须以 `NewWithSealer`（注入 refresh sealer）构造，否则桌面会话方法 `ErrNoSealer`（[§6.2](#62-启动装配main)）。
+
+桌面/账户中心两条流程的 scope 区分（`broker.go`）：桌面 `openid profile email offline_access` + `aud=lumen-api`；账户中心 `openid profile email`（无 offline_access、无 aud——账户中心永不调 Lumen API）。
+
+### 10.5 账户中心 cookie（同 SITE 跨源）
+
+SPA 在 `example.com`，broker 在 `chat.example.com`——**同 SITE**（同一注册域）、**跨 ORIGIN**。据此（`internal/broker/session.go`，decision 1）：
+
+| cookie | 用途 | MaxAge | 属性 |
+|--------|------|--------|------|
+| `lumen_session` | 账户中心会话（封装 `{sub, display_name, avatar_url, exp}`） | 8h | `SameSite=Lax` + `HttpOnly` + `Secure` + `Path=/` + **HOST-ONLY（无 Domain）** |
+| `lumen_auth_flow` | OIDC 登录流上下文（封装 `{verifier, state, exp}`） | 10m | 同上 |
+
+**HOST-ONLY（不设 `Domain`）** 使 cookie 只回发到签发主机 `chat.example.com`，绝不写成 `Domain=.example.com`。`/auth/login`、`/auth/callback` 是**顶层导航**（浏览器地址栏跳转，`SameSite=Lax` 允许携带 cookie）；账户中心 XHR（如 `GET /api/me`、`POST /auth/logout`）由 SPA 以 `credentials:'include'` 发起，靠 [§10.6](#106-单点-cors-中间件) 的精确白名单 CORS + `Allow-Credentials` 携带 cookie。
+
+### 10.6 单点 CORS 中间件
+
+**唯一** CORS 中间件在 root 层加一次（`internal/rest/cors.go`，`withCORS(cfg.WebBaseURL, handler)`，decision 3），包住整个 mux（含 `/api/v1/*` 与 broker 9 路由）：
+
+- 仅当请求 `Origin` **精确等于** `LUMEN_WEB_BASE_URL`（先 `canonicalOrigin` 归一到 `scheme://host[:port]`、去尾斜杠）时才发 `Access-Control-Allow-Origin: <origin>` + `Allow-Credentials: true` + `Allow-Methods: GET, POST, OPTIONS` + `Allow-Headers: Content-Type` + `Max-Age: 600`；**永不用 `*`**。
+- **恒发 `Vary: Origin`**（共享缓存按 Origin 分键，绝不把某源的 ACAO body 发给别的源）。
+- `OPTIONS` preflight 就地回 `204`；不匹配的源得到无 ACAO 的裸 `204`，浏览器判 CORS 失败。
+- 空 `WEB_BASE_URL` → 完全禁用 CORS（永不发 ACAO），安全默认。
+
+> `internal/broker/cors.go` 有一份等价的 broker 私有 `withCORS`，**仅**用于 `Handler.Routes()` 的独立/测试路径；生产由 `rest.NewRouter` 的这一份单点包裹，broker 的 `Register` 不再叠加中间件，避免重复 CORS 头。
+
+### 10.7 v0/v1 归属（broker）
+
+broker 全套（9 端点 + 两表 + secure + janitor + 单点 CORS）随 EdgeOne→Go 的迁移落地，与既有 v0 登录回路一同视为 **v0**（[00-overview §6.1](./00-overview.md#61-v0--最小开黑回路)）；账户中心资料展示/退出亦 v0。owner/多频道等仍按 [§8](#8-v0v1-归属汇总) 的 v0/v1 归属。

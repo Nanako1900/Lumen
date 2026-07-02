@@ -74,9 +74,11 @@ jobs:
           CGO_ENABLED: '1'   # -race 需要 cgo（ubuntu 自带 gcc）；build/vet 仍用 CGO_ENABLED=0
         run: go test -race -coverprofile=coverage.out ./...
 
-  # ── 官网（Node 20，Cloudflare Pages 构建产物）────────────────────
+  # ── 官网（Node 20，EdgeOne Pages 静态 SPA 构建产物）──────────────
+  # EdgeOne Pages 仅托管 website/dist/ 静态 SPA（无 Pages Functions / Worker）。
+  # 步骤：npm ci + npm run build + 条件 test（存在 "test" 脚本才跑，否则跳过）。
   website:
-    name: website (React/Cloudflare)
+    name: website (React/EdgeOne)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

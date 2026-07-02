@@ -35,7 +35,7 @@ type Config struct {
 	LogLevel         string
 
 	// --- Account center / desktop broker (web-design.md §5, §6, §9) ---
-	// These back the Go port of the EdgeOne Pages Functions. The confidential
+	// These back the account center / desktop login broker on the Go server. The confidential
 	// OIDC client credentials and both AES keys are required; the authorize /
 	// token / userinfo URLs are optional and derived from OIDC discovery when
 	// empty (mirroring env.ts + oidc.ts).

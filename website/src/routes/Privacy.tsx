@@ -12,8 +12,8 @@ export default function Privacy() {
       <h2 className="text-lg font-semibold text-zinc-100">令牌与凭据留存</h2>
       <ul className="list-disc space-y-1 pl-6">
         <li>
-          刷新令牌（refresh_token）仅留存于官网的 Cloudflare KV，<strong>不下发到桌面</strong>，
-          也不出 Cloudflare。
+          刷新令牌（refresh_token）仅<strong>加密</strong>留存于服务端数据库（PostgreSQL），
+          <strong>不下发到桌面</strong>，也不出服务端。
         </li>
         <li>
           桌面客户端只持有一个不透明的会话标识（desktop_session_id，存于系统凭据库），

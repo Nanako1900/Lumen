@@ -1,7 +1,9 @@
 /**
- * 前端 fetch（同源 /auth/*、/api/*）。所有请求 same-origin、credentials:include
- * 以携带 httpOnly 会话 cookie。前端绝不接触 access_token / client_secret。
+ * 前端 fetch：账户中心/认证跨域直连 Go 中介（chat.example.com）。
+ * XHR 均 credentials:'include' 以携带 host-only 会话 cookie；
+ * 登录/回调为顶层导航（见 goToLogin）。前端绝不接触 access_token / client_secret。
  */
+import { API_BASE_URL } from "./config";
 
 export interface MeResponse {
   display_name: string;
@@ -19,7 +21,7 @@ const WINDOWS_PLATFORM = "windows/amd64";
 
 /** 读取账户中心会话资料；未登录返回 null（401）。 */
 export async function fetchMe(signal?: AbortSignal): Promise<MeResponse | null> {
-  const res = await fetch("/api/me", {
+  const res = await fetch(`${API_BASE_URL}/api/me`, {
     credentials: "include",
     headers: { accept: "application/json" },
     signal,
@@ -29,38 +31,30 @@ export async function fetchMe(signal?: AbortSignal): Promise<MeResponse | null> 
   return (await res.json()) as MeResponse;
 }
 
-/** 触发账户中心登录（整页跳转到 Worker 端点）。 */
+/** 触发账户中心登录（顶层跳转到 Go 中介的 /auth/login）。 */
 export function goToLogin(): void {
-  window.location.assign("/auth/login");
+  window.location.assign(`${API_BASE_URL}/auth/login`);
 }
 
-/** 退出登录（POST /auth/logout）。 */
+/** 退出登录（POST /auth/logout，携带会话 cookie）。 */
 export async function logout(): Promise<void> {
-  await fetch("/auth/logout", { method: "POST", credentials: "include" });
+  await fetch(`${API_BASE_URL}/auth/logout`, {
+    method: "POST",
+    credentials: "include",
+  });
 }
 
 /**
- * 读取下载清单：先直连 chat.example.com/updates/latest.json（公开 GET），
- * 跨域失败则回退官网 Worker 代理 /api/download/latest。
+ * 读取下载清单：直连 chat.example.com/updates/latest.json（公开 GET）。
  * updatesUrl 为可配置的直连地址（由构建期注入或默认占位）。
  */
 export async function fetchLatestManifest(
   updatesUrl: string,
   signal?: AbortSignal,
 ): Promise<UpdateManifest> {
-  // 优先直连（若 Go 服务端放行 CORS）
-  try {
-    const direct = await fetch(updatesUrl, { headers: { accept: "application/json" }, signal });
-    if (direct.ok) return (await direct.json()) as UpdateManifest;
-  } catch {
-    // 跨域/网络失败 → 回退代理
-  }
-  const proxied = await fetch("/api/download/latest", {
-    headers: { accept: "application/json" },
-    signal,
-  });
-  if (!proxied.ok) throw new Error(`download manifest unavailable: ${proxied.status}`);
-  return (await proxied.json()) as UpdateManifest;
+  const res = await fetch(updatesUrl, { headers: { accept: "application/json" }, signal });
+  if (!res.ok) throw new Error(`download manifest unavailable: ${res.status}`);
+  return (await res.json()) as UpdateManifest;
 }
 
 /** 从清单取 Windows 安装包 URL。 */
