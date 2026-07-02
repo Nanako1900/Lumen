@@ -5,6 +5,7 @@
  * 可选：向 IdP token revocation 端点撤销 refresh_token（best-effort）。
  */
 import type { Env } from "../../_lib/env";
+import type { PagesFunction } from "../../_lib/runtime";
 import { badRequest, readJson, readStringField } from "../../_lib/http";
 import { isBase64Url } from "../../_lib/pkce";
 import { deleteSession, getSession } from "../../_lib/kv";

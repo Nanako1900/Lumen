@@ -6,6 +6,7 @@
  * session 不存在/IdP 拒绝 → 401 SESSION_INVALID（并删除失效会话）。
  */
 import type { Env } from "../../_lib/env";
+import type { PagesFunction } from "../../_lib/runtime";
 import { badRequest, json, jsonError, normalizeExpiresIn, readJson, readStringField } from "../../_lib/http";
 import { isBase64Url } from "../../_lib/pkce";
 import { deleteSession, getSession, putSession } from "../../_lib/kv";
@@ -33,7 +34,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     return jsonError(401, "SESSION_INVALID", "refresh rejected by identity provider");
   }
 
-  // IdP 轮换 refresh_token 则更新 KV（refresh_token 不出 Cloudflare）
+  // IdP 轮换 refresh_token 则更新 KV（refresh_token 不出服务端）
   if (token.refresh_token && token.refresh_token !== session.refresh_token) {
     await putSession(env, sessionId, { ...session, refresh_token: token.refresh_token });
   }

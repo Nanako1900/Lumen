@@ -5,6 +5,7 @@
  * scope=openid profile email offline_access；令 access_token 的 aud 含 lumen-api。
  */
 import type { Env } from "../_lib/env";
+import type { PagesFunction } from "../_lib/runtime";
 import { badRequest } from "../_lib/http";
 import { isLoopbackRedirectUri } from "../_lib/loopback";
 import { buildAuthorizeUrl } from "../_lib/oidc";

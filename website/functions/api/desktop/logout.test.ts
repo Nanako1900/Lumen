@@ -1,12 +1,14 @@
-import { describe, it, expect } from "vitest";
-import { env } from "cloudflare:test";
+import { describe, it, expect, beforeEach } from "vitest";
 import { onRequestPost } from "./logout";
-import { makeContext, jsonPost } from "../../_lib/testutil";
+import { makeContext, jsonPost, makeEnv } from "../../_lib/testutil";
 import { putSession, getSession } from "../../_lib/kv";
 import { randomToken } from "../../_lib/pkce";
 import type { Env } from "../../_lib/env";
 
-const testEnv = env as unknown as Env;
+let testEnv: Env;
+beforeEach(() => {
+  testEnv = makeEnv(); // 每个用例新建内存 KV，保证隔离
+});
 const URL_LOGOUT = "https://test.example/api/desktop/logout";
 
 describe("POST /api/desktop/logout", () => {

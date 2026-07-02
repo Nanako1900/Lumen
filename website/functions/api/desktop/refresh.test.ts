@@ -1,12 +1,14 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { env } from "cloudflare:test";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { onRequestPost } from "./refresh";
-import { makeContext, jsonPost, stubFetch, idpTokenRoute, fakeJwt } from "../../_lib/testutil";
+import { makeContext, jsonPost, stubFetch, idpTokenRoute, fakeJwt, makeEnv } from "../../_lib/testutil";
 import { putSession, getSession } from "../../_lib/kv";
 import { randomToken } from "../../_lib/pkce";
 import type { Env } from "../../_lib/env";
 
-const testEnv = env as unknown as Env;
+let testEnv: Env;
+beforeEach(() => {
+  testEnv = makeEnv(); // 每个用例新建内存 KV，保证隔离
+});
 const URL_REFRESH = "https://test.example/api/desktop/refresh";
 
 let restoreFetch: (() => void) | null = null;
@@ -40,7 +42,7 @@ describe("POST /api/desktop/refresh", () => {
       makeContext(jsonPost(URL_REFRESH, { desktop_session_id: id }), testEnv),
     );
     expect(res.status).toBe(200);
-    const body = await res.json<{ access_token: string; expires_in: number }>();
+    const body = (await res.json()) as { access_token: string; expires_in: number };
     expect(body.access_token).toBeTruthy();
     expect(body.expires_in).toBe(1800);
     // response must not leak refresh_token or session id
@@ -85,7 +87,7 @@ describe("POST /api/desktop/refresh", () => {
       makeContext(jsonPost(URL_REFRESH, { desktop_session_id: randomToken(48) }), testEnv),
     );
     expect(res.status).toBe(401);
-    const body = await res.json<{ error: { code: string } }>();
+    const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("SESSION_INVALID");
   });
 
@@ -98,7 +100,7 @@ describe("POST /api/desktop/refresh", () => {
       makeContext(jsonPost(URL_REFRESH, { desktop_session_id: id }), testEnv),
     );
     expect(res.status).toBe(401);
-    const body = await res.json<{ error: { code: string } }>();
+    const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("SESSION_INVALID");
     // failed session should be purged
     expect(await getSession(testEnv, id)).toBeNull();
@@ -113,7 +115,7 @@ describe("POST /api/desktop/refresh", () => {
     const res = await onRequestPost(
       makeContext(jsonPost(URL_REFRESH, { desktop_session_id: id }), testEnv),
     );
-    const body = await res.json<{ expires_in: number }>();
+    const body = (await res.json()) as { expires_in: number };
     expect(body.expires_in).toBe(300);
   });
 

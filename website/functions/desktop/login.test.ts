@@ -1,11 +1,14 @@
-import { describe, it, expect } from "vitest";
-import { env } from "cloudflare:test";
+import { describe, it, expect, beforeEach } from "vitest";
 import { onRequestGet } from "./login";
-import { makeContext } from "../_lib/testutil";
+import { makeContext, makeEnv } from "../_lib/testutil";
 import { s256 } from "../_lib/pkce";
+import { takeLoginContext } from "../_lib/kv";
 import type { Env } from "../_lib/env";
 
-const testEnv = env as unknown as Env;
+let testEnv: Env;
+beforeEach(() => {
+  testEnv = makeEnv(); // 每个用例新建内存 KV，保证隔离
+});
 
 function loginRequest(params: Record<string, string>): Request {
   const url = new URL("https://test.example/desktop/login");
@@ -52,14 +55,14 @@ describe("GET /desktop/login", () => {
     const res = await onRequestGet(makeContext(req, testEnv));
     const oidcState = new URL(res.headers.get("location")!).searchParams.get("state")!;
 
-    const stored = await testEnv.HANDOFF.get(`ctx:${oidcState}`);
-    expect(stored).toBeTruthy();
-    const ctx = JSON.parse(stored!);
-    expect(ctx.state).toBe("desktop-state-abc");
-    expect(ctx.challenge).toBe(challenge);
-    expect(ctx.redirectUri).toBe("http://127.0.0.1:9000/cb");
-    expect(typeof ctx.oidcVerifier).toBe("string");
-    expect(ctx.oidcVerifier.length).toBeGreaterThan(20);
+    // 经真实读路径取回暂存上下文（KV 值内嵌过期信封由 takeLoginContext 解封）
+    const ctx = await takeLoginContext(testEnv, oidcState);
+    expect(ctx).not.toBeNull();
+    expect(ctx!.state).toBe("desktop-state-abc");
+    expect(ctx!.challenge).toBe(challenge);
+    expect(ctx!.redirectUri).toBe("http://127.0.0.1:9000/cb");
+    expect(typeof ctx!.oidcVerifier).toBe("string");
+    expect(ctx!.oidcVerifier.length).toBeGreaterThan(20);
   });
 
   it("rejects non-loopback redirect_uri with 400", async () => {
@@ -71,7 +74,7 @@ describe("GET /desktop/login", () => {
     });
     const res = await onRequestGet(makeContext(req, testEnv));
     expect(res.status).toBe(400);
-    const body = await res.json<{ error: { code: string } }>();
+    const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("BAD_REQUEST");
   });
 

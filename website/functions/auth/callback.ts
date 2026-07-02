@@ -6,6 +6,7 @@
  * 不持久化 refresh_token）；302 回 /account。失败 302 回 /account?error=。
  */
 import type { Env } from "../_lib/env";
+import type { PagesFunction } from "../_lib/runtime";
 import { exchangeAuthCode, fetchProfile, subjectFrom } from "../_lib/oidc";
 import { timingSafeEqual } from "../_lib/pkce";
 import {

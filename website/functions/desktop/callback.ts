@@ -6,6 +6,7 @@
  * access_token 绝不进 URL。
  */
 import type { Env } from "../_lib/env";
+import type { PagesFunction } from "../_lib/runtime";
 import { badRequest } from "../_lib/http";
 import { normalizeExpiresIn } from "../_lib/http";
 import { exchangeAuthCode, fetchProfile, subjectFrom } from "../_lib/oidc";

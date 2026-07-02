@@ -6,6 +6,7 @@
  * 返回 {access_token, expires_in, desktop_session_id, profile}。
  */
 import type { Env } from "../../_lib/env";
+import type { PagesFunction } from "../../_lib/runtime";
 import { badRequest, json, normalizeExpiresIn, notFound, readJson, readStringField } from "../../_lib/http";
 import { isBase64Url, randomToken, s256, timingSafeEqual } from "../../_lib/pkce";
 import { consumeHandoff, putSession } from "../../_lib/kv";

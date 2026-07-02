@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Lumen 官网 + 桌面 Web 中介登录（React + Vite + Tailwind + Cloudflare Pages Functions）",
+  "description": "Lumen 官网 + 桌面 Web 中介登录（React + Vite + Tailwind + 腾讯 EdgeOne Pages Functions）",
   "scripts": {
     "dev": "vite",
     "build": "npm run typecheck && vite build",
@@ -12,7 +12,7 @@
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "pages:dev": "wrangler pages dev dist --kv HANDOFF --kv SESSIONS"
+    "edgeone:dev": "echo 'Local dev for EdgeOne Pages Functions: use the EdgeOne CLI or EdgeOne 控制台 to run functions/ + serve dist/. # EDGEONE-VERIFY: 以 EdgeOne 官方 CLI/控制台的本地开发命令为准'"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -20,8 +20,6 @@
     "react-router-dom": "^6.28.0"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.5.40",
-    "@cloudflare/workers-types": "^4.20241127.0",
     "@types/node": "^20.17.9",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
@@ -31,7 +29,6 @@
     "tailwindcss": "^3.4.15",
     "typescript": "^5.6.3",
     "vite": "^5.4.11",
-    "vitest": "^2.1.8",
-    "wrangler": "^3.90.0"
+    "vitest": "^2.1.8"
   }
 }

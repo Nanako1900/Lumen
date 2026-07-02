@@ -4,7 +4,7 @@
     "lib": ["ES2022", "WebWorker"],
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers"],
+    "types": ["vitest/globals"],
     "skipLibCheck": true,
 
     "isolatedModules": true,

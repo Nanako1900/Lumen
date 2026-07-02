@@ -1,10 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { env } from "cloudflare:test";
 import { onRequestGet } from "./latest";
-import { makeContext, stubFetch } from "../../_lib/testutil";
-import type { Env } from "../../_lib/env";
+import { makeContext, stubFetch, makeEnv } from "../../_lib/testutil";
 
-const testEnv = env as unknown as Env;
+const testEnv = makeEnv();
 const URL_LATEST = "https://test.example/api/download/latest";
 
 let restoreFetch: (() => void) | null = null;
@@ -33,7 +31,7 @@ describe("GET /api/download/latest (CORS proxy)", () => {
 
     const res = await onRequestGet(makeContext(new Request(URL_LATEST), testEnv));
     expect(res.status).toBe(200);
-    const body = await res.json<typeof manifest>();
+    const body = (await res.json()) as typeof manifest;
     expect(body.version).toBe("1.2.3");
     expect(body.platforms["windows/amd64"].url).toContain("Lumen-Setup-1.2.3.exe");
     expect(stub.calls[0].url).toBe(testEnv.UPDATES_LATEST_URL);
@@ -51,7 +49,7 @@ describe("GET /api/download/latest (CORS proxy)", () => {
     restoreFetch = stub.restore;
     const res = await onRequestGet(makeContext(new Request(URL_LATEST), testEnv));
     expect(res.status).toBe(502);
-    const body = await res.json<{ error: { code: string } }>();
+    const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("UPSTREAM_UNREACHABLE");
   });
 
