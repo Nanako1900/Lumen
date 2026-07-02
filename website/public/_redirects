@@ -1,6 +1,7 @@
-# SPA 回退：未命中静态文件的页面路由回退到 index.html（web-design.md §2.3 / §9.3）。
-# functions/ 端点路由优先级应高于此静态回退，因此 /desktop/*、/api/*、/auth/*
-# 端点不会被 /* 覆盖。
-# EDGEONE-VERIFY: EdgeOne Pages 的 SPA 回退/重写配置格式（是否沿用 _redirects）
-# 与 Functions 相对静态回退的优先级，以 EdgeOne 官方文档为准。
+# SPA 深链回退（额外兜底）。web-design.md §2.3 / §9.3。
+# 主用机制：edgeone.json 的 rewrites —— 对 /download /account /help /privacy /terms /about
+# 逐条「精确」回退到 /index.html（不含通配，绝不遮蔽 /api/* /auth/* /desktop/* 函数路由）。
+# 本 _redirects 的 /* 通配为额外兜底：若 EdgeOne 沿用 _redirects 约定，则覆盖未列出的未知路径；
+# 若不沿用则被忽略，不影响 edgeone.json 里的精确 rewrites。
+# 部署后核对：直达 /account 刷新应加载 SPA；同时 /auth/login、/api/me 等函数路由仍正常。
 /*    /index.html    200

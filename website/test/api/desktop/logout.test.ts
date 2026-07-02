@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { onRequestPost } from "./logout";
+import { onRequestPost } from "../../../functions/api/desktop/logout";
 import { makeContext, jsonPost, makeEnv } from "../../_lib/testutil";
-import { putSession, getSession } from "../../_lib/kv";
-import { randomToken } from "../../_lib/pkce";
-import type { Env } from "../../_lib/env";
+import { putSession, getSession } from "../../../functions/_lib/kv";
+import { randomToken } from "../../../functions/_lib/pkce";
+import type { Env } from "../../../functions/_lib/env";
 
 let testEnv: Env;
 beforeEach(() => {

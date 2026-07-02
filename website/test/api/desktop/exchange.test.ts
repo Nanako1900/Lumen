@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { onRequestPost } from "./exchange";
+import { onRequestPost } from "../../../functions/api/desktop/exchange";
 import { makeContext, jsonPost, fakeJwt, makeEnv } from "../../_lib/testutil";
-import { putHandoff, getSession, type HandoffRecord } from "../../_lib/kv";
-import { s256, randomToken } from "../../_lib/pkce";
-import type { Env } from "../../_lib/env";
+import { putHandoff, getSession, type HandoffRecord } from "../../../functions/_lib/kv";
+import { s256, randomToken } from "../../../functions/_lib/pkce";
+import type { Env } from "../../../functions/_lib/env";
 
 let testEnv: Env;
 beforeEach(() => {

@@ -7,7 +7,7 @@ import {
   readJson,
   normalizeExpiresIn,
   readStringField,
-} from "./http";
+} from "../../functions/_lib/http";
 
 describe("json / jsonError", () => {
   it("json sets status, content-type and no-store", async () => {

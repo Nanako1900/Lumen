@@ -1,26 +1,14 @@
 {
-  "_EDGEONE_VERIFY": "EDGEONE-VERIFY: 本文件为 EdgeOne Pages 项目配置的 best-effort 占位，字段名/结构以 EdgeOne 官方控制台/CLI 实际约定为准。部署时须在 EdgeOne 控制台完成：(1) 把两个 KV 命名空间绑定为 env.HANDOFF / env.SESSIONS；(2) 把 OIDC_CLIENT_SECRET 与 SESSION_ENC_KEY 设为加密变量（绝不写入本文件/仓库）；(3) 确认 functions/ 为文件路由的 Functions 目录、dist/ 为静态输出目录。",
-  "name": "lumen-website",
-  "build": {
-    "command": "npm ci && npm run build",
-    "outputDirectory": "dist",
-    "functionsDirectory": "functions"
-  },
-  "kvNamespaces": [
-    { "binding": "HANDOFF", "namespace": "REPLACE_WITH_HANDOFF_NAMESPACE_ID" },
-    { "binding": "SESSIONS", "namespace": "REPLACE_WITH_SESSIONS_NAMESPACE_ID" }
-  ],
-  "vars": {
-    "OIDC_ISSUER": "https://auth.example.com/realms/lumen",
-    "OIDC_AUTHORIZE_URL": "https://auth.example.com/realms/lumen/protocol/openid-connect/auth",
-    "OIDC_TOKEN_URL": "https://auth.example.com/realms/lumen/protocol/openid-connect/token",
-    "OIDC_USERINFO_URL": "https://auth.example.com/realms/lumen/protocol/openid-connect/userinfo",
-    "OIDC_CLIENT_ID": "lumen-website",
-    "OIDC_AUDIENCE": "lumen-api",
-    "OIDC_DESKTOP_REDIRECT_URI": "https://example.com/desktop/callback",
-    "OIDC_WEB_REDIRECT_URI": "https://example.com/auth/callback",
-    "WEB_BASE_URL": "https://example.com",
-    "UPDATES_LATEST_URL": "https://chat.example.com/updates/latest.json"
-  },
-  "secrets": ["OIDC_CLIENT_SECRET", "SESSION_ENC_KEY"]
+  "buildCommand": "npm run build",
+  "installCommand": "npm ci",
+  "outputDirectory": "dist",
+  "nodeVersion": "20.18.0",
+  "rewrites": [
+    { "source": "/download", "destination": "/index.html" },
+    { "source": "/account", "destination": "/index.html" },
+    { "source": "/help", "destination": "/index.html" },
+    { "source": "/privacy", "destination": "/index.html" },
+    { "source": "/terms", "destination": "/index.html" },
+    { "source": "/about", "destination": "/index.html" }
+  ]
 }

@@ -4,8 +4,8 @@
  * 仅测试使用（不参与生产构建路由——文件名非端点，且在 _lib/ 下）。
  */
 import { vi } from "vitest";
-import type { Env } from "./env";
-import type { EdgeKV, PagesFunction } from "./runtime";
+import type { Env } from "../../functions/_lib/env";
+import type { EdgeKV, PagesFunction } from "../../functions/_lib/runtime";
 
 /**
  * 内存 EdgeKV（基于 Map），实现 get/put/delete。

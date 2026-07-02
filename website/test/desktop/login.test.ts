@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { onRequestGet } from "./login";
+import { onRequestGet } from "../../functions/desktop/login";
 import { makeContext, makeEnv } from "../_lib/testutil";
-import { s256 } from "../_lib/pkce";
-import { takeLoginContext } from "../_lib/kv";
-import type { Env } from "../_lib/env";
+import { s256 } from "../../functions/_lib/pkce";
+import { takeLoginContext } from "../../functions/_lib/kv";
+import type { Env } from "../../functions/_lib/env";
 
 let testEnv: Env;
 beforeEach(() => {

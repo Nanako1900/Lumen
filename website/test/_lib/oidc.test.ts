@@ -6,7 +6,7 @@ import {
   profileFromJwt,
   exchangeAuthCode,
   refreshWithIdp,
-} from "./oidc";
+} from "../../functions/_lib/oidc";
 import { fakeJwt, stubFetch, idpTokenRoute, makeEnv } from "./testutil";
 
 const testEnv = makeEnv();

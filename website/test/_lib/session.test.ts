@@ -7,7 +7,7 @@ import {
   readSessionCookie,
   defaultSessionExp,
   SESSION_COOKIE,
-} from "./session";
+} from "../../functions/_lib/session";
 import { makeEnv } from "./testutil";
 
 const testEnv = makeEnv();

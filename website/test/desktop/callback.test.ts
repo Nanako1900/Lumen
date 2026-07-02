@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { onRequestGet } from "./callback";
+import { onRequestGet } from "../../functions/desktop/callback";
 import {
   makeContext,
   stubFetch,
@@ -8,9 +8,9 @@ import {
   fakeJwt,
   makeEnv,
 } from "../_lib/testutil";
-import { putLoginContext, consumeHandoff } from "../_lib/kv";
-import { s256 } from "../_lib/pkce";
-import type { Env } from "../_lib/env";
+import { putLoginContext, consumeHandoff } from "../../functions/_lib/kv";
+import { s256 } from "../../functions/_lib/pkce";
+import type { Env } from "../../functions/_lib/env";
 
 let testEnv: Env;
 beforeEach(() => {

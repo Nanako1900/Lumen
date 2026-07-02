@@ -17,9 +17,9 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": [
-    "functions/**/*.test.ts",
-    "functions/**/*.spec.ts",
-    "functions/_lib/testutil.ts",
+    "test/**/*.test.ts",
+    "test/**/*.spec.ts",
+    "test/_lib/testutil.ts",
     "vitest.config.ts"
   ]
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isLoopbackRedirectUri, safeUrl } from "./loopback";
+import { isLoopbackRedirectUri, safeUrl } from "../../functions/_lib/loopback";
 
 describe("isLoopbackRedirectUri", () => {
   it("accepts http://127.0.0.1:<port>/... with any port", () => {

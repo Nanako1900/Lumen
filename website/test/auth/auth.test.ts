@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { onRequestGet as authLogin } from "./login";
-import { onRequestGet as authCallback } from "./callback";
-import { onRequestPost as authLogout } from "./logout";
-import { onRequestGet as apiMe } from "../api/me";
+import { onRequestGet as authLogin } from "../../functions/auth/login";
+import { onRequestGet as authCallback } from "../../functions/auth/callback";
+import { onRequestPost as authLogout } from "../../functions/auth/logout";
+import { onRequestGet as apiMe } from "../../functions/api/me";
 import {
   makeContext,
   stubFetch,
@@ -19,8 +19,8 @@ import {
   sealSession,
   defaultSessionExp,
   defaultAuthFlowExp,
-} from "../_lib/session";
-import type { Env } from "../_lib/env";
+} from "../../functions/_lib/session";
+import type { Env } from "../../functions/_lib/env";
 
 let testEnv: Env;
 beforeEach(() => {

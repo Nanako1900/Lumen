@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { onRequestGet } from "./latest";
+import { onRequestGet } from "../../../functions/api/download/latest";
 import { makeContext, stubFetch, makeEnv } from "../../_lib/testutil";
 
 const testEnv = makeEnv();

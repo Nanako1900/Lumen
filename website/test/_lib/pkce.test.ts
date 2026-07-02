@@ -6,7 +6,7 @@ import {
   s256,
   randomToken,
   timingSafeEqual,
-} from "./pkce";
+} from "../../functions/_lib/pkce";
 
 describe("base64url", () => {
   it("encodes without padding and URL-safe alphabet", () => {
