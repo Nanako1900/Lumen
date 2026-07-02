@@ -14,7 +14,7 @@ Thumbs.db
 *.test
 *.out
 /server/lumen-server
-/server/**/lumen-server
+/server/cmd/lumen-server/lumen-server
 vendor/
 
 # ---- Python (ops scripts) ----

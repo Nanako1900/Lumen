@@ -5,6 +5,7 @@ package storefake
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"strings"
 	"sync"
@@ -22,9 +23,22 @@ type Fake struct {
 	messages []store.Message
 	seq      int
 
+	// Broker state (account center / desktop). login_ctx and handoff share one
+	// map keyed by token, with a per-row absolute expiry mirroring the DB
+	// expires_at guard; desktop sessions have no expiry.
+	broker   map[string]brokerRow
+	sessions map[string]store.DesktopSession
+
 	// UpsertHook, when set, is invoked at the start of UpsertUser (to simulate
 	// errors or observe calls).
 	UpsertHook func(subject string) error
+}
+
+// brokerRow is an in-memory broker_states row.
+type brokerRow struct {
+	kind      string
+	payload   []byte // JSON, matching the JSONB column
+	expiresAt time.Time
 }
 
 // New builds an empty Fake.
@@ -33,6 +47,8 @@ func New() *Fake {
 		users:    make(map[string]store.User),
 		bySub:    make(map[string]string),
 		channels: make(map[string]store.Channel),
+		broker:   make(map[string]brokerRow),
+		sessions: make(map[string]store.DesktopSession),
 	}
 }
 
@@ -290,6 +306,108 @@ func (f *Fake) ListMessages(_ context.Context, channelID, before string, limit i
 		all[i], all[j] = all[j], all[i]
 	}
 	return all, hasMore, nil
+}
+
+// --- Broker: login context / handoff / desktop sessions ---
+
+// PutLoginContext stages a login_ctx row with the ~600s TTL.
+func (f *Fake) PutLoginContext(_ context.Context, oidcState string, lc store.LoginContext) error {
+	return f.putBroker(oidcState, "login_ctx", lc, store.LoginContextTTL)
+}
+
+// TakeLoginContext one-time consumes a login_ctx row (expiry guarded).
+func (f *Fake) TakeLoginContext(_ context.Context, oidcState string) (store.LoginContext, error) {
+	var lc store.LoginContext
+	if err := f.consumeBroker(oidcState, "login_ctx", &lc); err != nil {
+		return store.LoginContext{}, err
+	}
+	return lc, nil
+}
+
+// PutHandoff stages a handoff row with the ~120s TTL.
+func (f *Fake) PutHandoff(_ context.Context, handoffCode string, h store.Handoff) error {
+	return f.putBroker(handoffCode, "handoff", h, store.HandoffTTL)
+}
+
+// ConsumeHandoff one-time consumes a handoff row (expiry guarded).
+func (f *Fake) ConsumeHandoff(_ context.Context, handoffCode string) (store.Handoff, error) {
+	var h store.Handoff
+	if err := f.consumeBroker(handoffCode, "handoff", &h); err != nil {
+		return store.Handoff{}, err
+	}
+	return h, nil
+}
+
+func (f *Fake) putBroker(key, kind string, payload any, ttl time.Duration) error {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.broker[key] = brokerRow{kind: kind, payload: raw, expiresAt: time.Now().UTC().Add(ttl)}
+	return nil
+}
+
+func (f *Fake) consumeBroker(key, kind string, out any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	row, ok := f.broker[key]
+	if !ok || row.kind != kind {
+		return store.ErrNotFound
+	}
+	if !time.Now().UTC().Before(row.expiresAt) {
+		delete(f.broker, key) // expired: consume-on-read cleanup
+		return store.ErrNotFound
+	}
+	delete(f.broker, key) // one-time consume
+	return json.Unmarshal(row.payload, out)
+}
+
+// DeleteExpiredBrokerStates drops expired broker rows, returning the count.
+func (f *Fake) DeleteExpiredBrokerStates(context.Context) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	now := time.Now().UTC()
+	var n int64
+	for k, row := range f.broker {
+		if !now.Before(row.expiresAt) {
+			delete(f.broker, k)
+			n++
+		}
+	}
+	return n, nil
+}
+
+// PutSession stores a desktop session (refresh_token kept in-memory as-is; the
+// fake does not exercise at-rest encryption).
+func (f *Fake) PutSession(_ context.Context, s store.DesktopSession) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if s.CreatedAt.IsZero() {
+		s.CreatedAt = time.Now().UTC()
+	}
+	f.sessions[s.ID] = s
+	return nil
+}
+
+// GetSession returns a desktop session by id.
+func (f *Fake) GetSession(_ context.Context, id string) (store.DesktopSession, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s, ok := f.sessions[id]
+	if !ok {
+		return store.DesktopSession{}, store.ErrNotFound
+	}
+	return s, nil
+}
+
+// DeleteSession removes a desktop session (missing is a no-op).
+func (f *Fake) DeleteSession(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.sessions, id)
+	return nil
 }
 
 // itoa is a tiny int→string helper avoiding strconv import.

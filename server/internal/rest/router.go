@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"lumen/internal/auth"
+	"lumen/internal/broker"
 	"lumen/internal/config"
 	"lumen/internal/sfu"
 	"lumen/internal/signaling"
@@ -21,6 +22,11 @@ type Deps struct {
 	Hub      signaling.Broadcaster
 	Config   config.Config
 	Logger   *slog.Logger
+
+	// Broker mounts the account-center + desktop broker endpoints (decision 10)
+	// on the root mux as PUBLIC routes. Optional: a nil Broker skips them (e.g.
+	// tests that only exercise the /api/v1/* surface).
+	Broker *broker.Handler
 }
 
 // NewRouter builds the REST handler tree (contract §3.3). It maps the member
@@ -61,5 +67,16 @@ func NewRouter(d Deps) http.Handler {
 	mux.Handle("DELETE /api/v1/channels/{channelId}", owner(deleteChannel(d.Store, d.Hub)))
 	mux.Handle("POST /api/v1/members/{userId}/kick", owner(kickMember(d.Store, d.Owners, d.Hub)))
 
-	return withRecover(logger, withLogging(logger, mux))
+	// account center / desktop broker (decision 10) — mounted on the same root
+	// mux as PUBLIC routes (no RequireAuth; the broker manages its own auth via
+	// handoff codes and sealed cookies). The broker's /api/me is the cookie one
+	// and does not clash with the Bearer-authed /api/v1/me above (distinct path).
+	if d.Broker != nil {
+		d.Broker.Register(mux)
+	}
+
+	// Single CORS middleware (decision 3) wraps the whole mux with exact-origin
+	// == cfg.WebBaseURL. Applied outside recovery/logging so preflight OPTIONS
+	// and the Vary: Origin header are set on every response.
+	return withCORS(d.Config.WebBaseURL, withRecover(logger, withLogging(logger, mux)))
 }
