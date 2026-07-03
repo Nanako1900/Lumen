@@ -5,13 +5,13 @@
 
 ## 架构要点
 
-- HTTP/WS（REST + WebSocket 信令）经 **Coolify Traefik** 终结 TLS，容器内监听**明文** `0.0.0.0:8080`。
+- HTTP/WS（REST + WebSocket 信令）经 **Coolify Traefik** 终结 TLS，容器内监听**明文** `0.0.0.0:8090`（原 8080 在部署宿主机被占用、探测返回 502，故改 8090；端口由 env `LUMEN_LISTEN_ADDR` 决定）。
 - WebRTC 媒体（DTLS-SRTP）走**裸 UDP 端口**（默认 `40000/udp`），**绕过 Traefik**，由 Coolify Ports Mappings 直发宿主机。
 - PostgreSQL 为 Coolify 资源（或外部托管 PG）；应用启动幂等建表 + 幂等种子频道（text『大厅』+ voice『开黑1』），**应用容器无需持久卷**。
 - 自动更新文件（`[v1]`）经 `GET /updates/` 静态托管，目录由 Persistent Storage 挂载。
 
 ```
-客户端 ──443/tcp (HTTPS REST + WSS)──▶ Traefik(终结 TLS) ──明文 http/ws──▶ 容器 0.0.0.0:8080
+客户端 ──443/tcp (HTTPS REST + WSS)──▶ Traefik(终结 TLS) ──明文 http/ws──▶ 容器 0.0.0.0:8090
 客户端 ──40000/udp (DTLS-SRTP 媒体)──▶ 宿主机:40000/udp (Ports Mappings) ──▶ 容器 0.0.0.0:40000/udp
 容器 ──5432/tcp (Coolify 内网)──▶ PostgreSQL 资源
 ```
@@ -44,10 +44,10 @@ postgres://lumen:<password>@<db-service-name>:5432/lumen?sslmode=disable
 
 | Coolify 字段 | 值 | 作用 |
 |--------------|-----|------|
-| **Ports Exposes** | `8080` | 容器监听端口，Traefik 据此转发 HTTP/WS；第一个=健康检查口 |
+| **Ports Exposes** | `8090` | 容器监听端口，Traefik 据此转发 HTTP/WS；第一个=健康检查口（原 8080 被占→8090，须与 `LUMEN_LISTEN_ADDR`、Health Check 端口一致） |
 | **Ports Mappings** | `40000:40000/udp` | 裸 UDP 直发宿主机（WebRTC 媒体），绕过 Traefik |
 | **Domains (FQDN)** | `https://chat.example.com` | Traefik 自动签 Let's Encrypt + 强制 HTTPS，对外即 wss/https |
-| **Health Check** | `GET /api/v1/healthz` | Coolify 探活（纯存活探针，不查 DB） |
+| **Health Check** | Host `127.0.0.1` · Port `8090` · `GET /api/v1/healthz` | Coolify 探活（纯存活探针，不查 DB）。**Host 用 `127.0.0.1` 不用 `localhost`**（容器内 `localhost` 可能解析成 IPv6 `::1`，服务只绑 IPv4）；改探针后须 **Redeploy** 生效 |
 
 > **端口四处一致**：Dockerfile `EXPOSE 40000/udp` = Coolify Ports Mappings = env `LUMEN_WEBRTC_UDP_PORT=40000` = 云安全组放行。
 >
@@ -65,7 +65,7 @@ postgres://lumen:<password>@<db-service-name>:5432/lumen?sslmode=disable
 
 | 变量 | 值 | 备注 |
 |------|-----|------|
-| `LUMEN_LISTEN_ADDR` | `0.0.0.0:8080` | **必须 0.0.0.0**，否则 Traefik 到不了容器 |
+| `LUMEN_LISTEN_ADDR` | `0.0.0.0:8090` | **必须 0.0.0.0**，否则 Traefik 到不了容器；端口须与 Ports Exposes / Health Check 一致 |
 | `LUMEN_WEBRTC_UDP_PORT` | `40000` | 与 Ports Mappings 一致 |
 | `LUMEN_PUBLIC_IP` | `<VPS 公网 IP>` | `SetNAT1To1IPs` 宣告；替换 host 候选 |
 | `LUMEN_DATABASE_URL` | `postgres://lumen:***@<db>:5432/lumen?sslmode=disable` | 步骤 1 的 DSN |
@@ -89,7 +89,7 @@ postgres://lumen:<password>@<db-service-name>:5432/lumen?sslmode=disable
 ## 部署后核对清单
 
 - [ ] `GET https://chat.example.com/api/v1/healthz` 返回 `{"success":true,"data":{"status":"ok"},"error":null}`。
-- [ ] 首次启动日志出现 `listening`（`addr=0.0.0.0:8080 udp=40000`），无 fail-fast 报错。
+- [ ] 首次启动日志出现 `listening`（`addr=0.0.0.0:8090 udp=40000`），无 fail-fast 报错。
 - [ ] PostgreSQL 已建表（`users`/`channels`/`messages`）且有种子频道（`大厅`/`开黑1`）。
 - [ ] 云安全组放行 `443/tcp` + `40000/udp`。
 - [ ] 用真实 `access_token` 调 `GET /api/v1/bootstrap` 返回 me/channels/members/voice_states/ws_url；无效/过期/错 aud 的 token 被拒（`TOKEN_INVALID`/`TOKEN_EXPIRED`）。
