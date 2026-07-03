@@ -71,5 +71,5 @@
 - **CI**：[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) —— server(Go 1.24) / website(Node 20) / client(Wails) 三 job；用「存在守卫」探测各端代码，骨架期为绿，代码合入后自动转真实 build/test。
 - **IdP 登记与配置对齐**：[`docs/ops/idp-setup.md`](./docs/ops/idp-setup.md)（回调 `chat.example.com/{desktop,auth}/callback`、`aud=lumen-api`、scope、issuer/audience/域名/端口对齐矩阵；`client_secret`/`refresh_token` 均在 Go 服务端）。
 - **登录链路集成校验（无客户端）**：[`docs/ops/verify-login.md`](./docs/ops/verify-login.md) + [`scripts/`](./scripts)（healthz / Bearer bootstrap / WS `auth_ok`；半自动 handoff；access_token 不进 URL 核对）。
-- **部署 · 后端（服务端 + 登录中介）**：[`docs/ops/deploy-coolify.md`](./docs/ops/deploy-coolify.md)（Coolify：PostgreSQL + 8080/Traefik + 40000/udp + env（含 `LUMEN_OAUTH_*` broker 组）+ healthz；登录中介与资源服务器同进程）。
+- **部署 · 后端（服务端 + 登录中介）**：[`docs/ops/deploy-coolify.md`](./docs/ops/deploy-coolify.md)（Coolify：PostgreSQL + 8090/Traefik + 40000/udp + env（含 `LUMEN_OAUTH_*` broker 组）+ healthz；登录中介与资源服务器同进程）。
 - **部署 · 前端（纯静态）**：[`docs/ops/deploy-edgeone.md`](./docs/ops/deploy-edgeone.md)（EdgeOne Pages：**仅静态托管 `website/dist/` + SPA 重写 + 域名**；`edgeone.json` 只保留 build 配置 + SPA rewrites，**无 Functions / 无 KV / 无 Secrets**）。

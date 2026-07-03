@@ -203,7 +203,7 @@ Logto 用 **API resource** + `resource` 参数（RFC 8707 Resource Indicators）
 | **WebSocket** | `LUMEN_PUBLIC_WS_URL` | — | `wss://api.lumen.nanako.com.cn/ws` | = API 子域的 `/ws` |
 | **公网 IP** | `LUMEN_PUBLIC_IP`（`SetNAT1To1IPs`） | — | `203.0.113.10`（占位，= VPS 实际公网 IP） | = VPS 实际公网 IP |
 | **WebRTC UDP 端口** | `LUMEN_WEBRTC_UDP_PORT` | — | `40000` | = Dockerfile EXPOSE = Coolify Ports Mappings = 安全组放行（四处一致） |
-| **HTTP/WS 端口** | `LUMEN_LISTEN_ADDR`（**`0.0.0.0:8080`**） | — | `0.0.0.0:8080` | = Dockerfile EXPOSE = Coolify Ports Exposes |
+| **HTTP/WS 端口** | `LUMEN_LISTEN_ADDR`（**`0.0.0.0:8090`**） | — | `0.0.0.0:8090` | = Dockerfile EXPOSE = Coolify Ports Exposes |
 | **owner 名单** | `LUMEN_OWNER_SUBJECTS`（逗号分隔 `sub`） | 对应用户的 `sub` | `sub-abc,sub-def`（占位，= IdP 中 owner 用户的 `sub`） | = IdP 中 owner 用户的 `sub` |
 
 > **官网静态域 vs API/登录中介子域**：官网 `lumen.nanako.com.cn` 为**纯静态 SPA**（腾讯 EdgeOne Pages，只托管 `website/dist/`，无 Functions/KV/密钥）；Lumen API/WS/更新**以及登录中介（broker）**全部托管在 `api.lumen.nanako.com.cn`（Go 服务端 + Coolify Traefik）。回调域随之落在 `api.lumen.nanako.com.cn`（见 §2.1）。
@@ -227,7 +227,7 @@ Logto 用 **API resource** + `resource` 参数（RFC 8707 Resource Indicators）
 
 ### 4.2 Coolify（Go 服务端）env 注入清单
 
-在 Coolify 应用 → Environment Variables 注入全部 `LUMEN_*`（含**资源服务器** + **登录中介 broker** 两组，同进程；改后需重新部署）。完整表见 [`server-design.md §6.1`](../design/server-design.md#61-配置全部环境变量) 与本仓库 `server/.env.example`（由服务端分支提供；若尚未落地，占位清单见 [`docs/DEV.md`](../DEV.md#附录服务端-env-占位清单)）。关键对齐：`LUMEN_LISTEN_ADDR=0.0.0.0:8080`、`LUMEN_WEBRTC_UDP_PORT` 与 Ports Mappings 一致、`LUMEN_OAUTH_AUDIENCE=lumen-api`、`LUMEN_OAUTH_ISSUER=https://www.nanako.org`（与 IdP 实际 issuer 逐字一致，带 `www`）、`LUMEN_OAUTH_JWKS_URL=https://www.nanako.org/.well-known/jwks.json`、`LUMEN_PUBLIC_WS_URL=wss://api.lumen.nanako.com.cn/ws`；broker 专属：`LUMEN_OAUTH_CLIENT_ID`/`LUMEN_OAUTH_CLIENT_SECRET`（占位密钥）/`LUMEN_OAUTH_DESKTOP_REDIRECT_URI`(=`https://api.lumen.nanako.com.cn/desktop/callback`)/`LUMEN_OAUTH_WEB_REDIRECT_URI`(=`https://api.lumen.nanako.com.cn/auth/callback`)/`LUMEN_WEB_BASE_URL`(=`https://lumen.nanako.com.cn`)/`LUMEN_SESSION_ENC_KEY`/`LUMEN_REFRESH_ENC_KEY`（占位密钥）。**数据库**：`LUMEN_DATABASE_URL` 指向 Coolify 内网 Postgres，**保留 `?sslmode=disable`**（内网连接无需 TLS），其中 DB 密码与内网主机为占位，勿写入真实值。
+在 Coolify 应用 → Environment Variables 注入全部 `LUMEN_*`（含**资源服务器** + **登录中介 broker** 两组，同进程；改后需重新部署）。完整表见 [`server-design.md §6.1`](../design/server-design.md#61-配置全部环境变量) 与本仓库 `server/.env.example`（由服务端分支提供；若尚未落地，占位清单见 [`docs/DEV.md`](../DEV.md#附录服务端-env-占位清单)）。关键对齐：`LUMEN_LISTEN_ADDR=0.0.0.0:8090`、`LUMEN_WEBRTC_UDP_PORT` 与 Ports Mappings 一致、`LUMEN_OAUTH_AUDIENCE=lumen-api`、`LUMEN_OAUTH_ISSUER=https://www.nanako.org`（与 IdP 实际 issuer 逐字一致，带 `www`）、`LUMEN_OAUTH_JWKS_URL=https://www.nanako.org/.well-known/jwks.json`、`LUMEN_PUBLIC_WS_URL=wss://api.lumen.nanako.com.cn/ws`；broker 专属：`LUMEN_OAUTH_CLIENT_ID`/`LUMEN_OAUTH_CLIENT_SECRET`（占位密钥）/`LUMEN_OAUTH_DESKTOP_REDIRECT_URI`(=`https://api.lumen.nanako.com.cn/desktop/callback`)/`LUMEN_OAUTH_WEB_REDIRECT_URI`(=`https://api.lumen.nanako.com.cn/auth/callback`)/`LUMEN_WEB_BASE_URL`(=`https://lumen.nanako.com.cn`)/`LUMEN_SESSION_ENC_KEY`/`LUMEN_REFRESH_ENC_KEY`（占位密钥）。**数据库**：`LUMEN_DATABASE_URL` 指向 Coolify 内网 Postgres，**保留 `?sslmode=disable`**（内网连接无需 TLS），其中 DB 密码与内网主机为占位，勿写入真实值。
 
 ---
 

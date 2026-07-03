@@ -368,7 +368,7 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
                                       ▼
                        ┌─────────────────────────────────┐
 客户端 ──UDP 媒体───────▶│ 容器: lumen-server               │
-  (DTLS-SRTP)           │  - http/ws 监听 0.0.0.0:8080      │
+  (DTLS-SRTP)           │  - http/ws 监听 0.0.0.0:8090      │
   裸 UDP 端口映射         │  - WebRTC 监听 0.0.0.0:40000/udp  │
   (不经 Traefik)         │  - 连 PostgreSQL(5432, 内网)      │
                        └────────────────┬────────────────┘
@@ -384,7 +384,7 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 
 | Coolify 字段 | 值 | 作用 |
 |--------------|-----|------|
-| Ports Exposes | `8080` | 容器监听端口，Traefik 据此转发 HTTP/WS；第一个=健康检查口 |
+| Ports Exposes | `8090` | 容器监听端口，Traefik 据此转发 HTTP/WS；第一个=健康检查口 |
 | Ports Mappings | `40000:40000/udp` | 裸 UDP 直发宿主机，绕过 Traefik（WebRTC 媒体） |
 | Domains (FQDN) | `https://chat.example.com` | Traefik 自动签证书 + 强制 HTTPS；对外即 wss/https |
 | PostgreSQL（数据库资源） | 新建 Coolify PostgreSQL 服务（或外部 PG） | 提供 `LUMEN_DATABASE_URL`；持久化/备份由该资源管理（应用容器无需持久卷） |
@@ -402,7 +402,7 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 | `LUMEN_OAUTH_USERINFO_URL` | userinfo 端点（资料补齐）；**可选**，缺省由 OIDC discovery 推导 | `https://auth.example.com/realms/lumen/protocol/openid-connect/userinfo` | ✗ | v0 |
 | `LUMEN_OAUTH_AUDIENCE` | 期望的 `aud` 值（资源侧验 access_token；broker 侧另用 `LUMEN_OAUTH_CLIENT_ID`） | `lumen-api` | ✓ | v0 |
 | `LUMEN_OWNER_SUBJECTS` | owner 的 OAuth sub 列表（逗号分隔） | `sub-abc,sub-def` | ✓ | v0 |
-| `LUMEN_LISTEN_ADDR` | HTTP/WS 监听地址（**必须 `0.0.0.0`**） | `0.0.0.0:8080` | ✓ | v0 |
+| `LUMEN_LISTEN_ADDR` | HTTP/WS 监听地址（**必须 `0.0.0.0`**） | `0.0.0.0:8090` | ✓ | v0 |
 | `LUMEN_DATABASE_URL` | PostgreSQL 连接串（DSN） | `postgres://lumen:***@lumen-db:5432/lumen?sslmode=disable` | ✓ | v0 |
 | `LUMEN_PUBLIC_IP` | VPS 公网 IP（`SetNAT1To1IPs` 宣告） | `203.0.113.10` | ✓ | v0 |
 | `LUMEN_WEBRTC_UDP_PORT` | WebRTC 媒体单 UDP 端口（与 Ports Mappings 一致） | `40000` | ✓ | v0 |
@@ -425,7 +425,7 @@ Lumen 是一个**类 Discord 的轻量语音聊天工具**（开黑用）：Wind
 | 一致项 | 出现位置 |
 |--------|----------|
 | WebRTC UDP 端口（如 `40000`） | Dockerfile `EXPOSE 40000/udp` = Coolify Ports Mappings = env `LUMEN_WEBRTC_UDP_PORT` = 云安全组放行 |
-| HTTP/WS 端口（如 `8080`） | Dockerfile `EXPOSE 8080` = Coolify Ports Exposes = env `LUMEN_LISTEN_ADDR` |
+| HTTP/WS 端口（如 `8090`） | Dockerfile `EXPOSE 8090` = Coolify Ports Exposes = env `LUMEN_LISTEN_ADDR` |
 | 公网 IP | env `LUMEN_PUBLIC_IP`（`SetNAT1To1IPs`）= VPS 实际公网 IP |
 | issuer/audience | 服务端 `LUMEN_OAUTH_ISSUER`/`LUMEN_OAUTH_AUDIENCE`（broker 与资源验签共用）= OAuth2 服务器实际值（access_token `aud` 含 `lumen-api`） |
 | 官网 Base URL | 服务端 `LUMEN_WEB_BASE_URL`（`https://example.com`，CORS 白名单）= 官网 EdgeOne Pages 域名 = SPA 部署源 |

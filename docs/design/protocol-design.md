@@ -101,7 +101,7 @@ Lumen 采用 **REST + WebSocket + WebRTC** 三层混合：
 | `LUMEN_OAUTH_USERINFO_URL` | userinfo 端点（资料同步；**可选**，缺省由 OIDC discovery 自 issuer 推导，仅在需覆盖时配置） | `https://auth.example.com/.../userinfo` | v0 |
 | `LUMEN_OAUTH_AUDIENCE` | 期望的 `aud` 值（验 access_token；同时用于 broker 令签发 token 的 `aud` 含此值） | `lumen-api` | v0 |
 | `LUMEN_OWNER_SUBJECTS` | owner 的 OAuth subject 列表，逗号分隔 | `sub-abc,sub-def` | v0 |
-| `LUMEN_LISTEN_ADDR` | HTTP/WS 监听地址（容器内**必须绑 `0.0.0.0`**，否则 Traefik 无法到达容器） | `0.0.0.0:8080` | v0 |
+| `LUMEN_LISTEN_ADDR` | HTTP/WS 监听地址（容器内**必须绑 `0.0.0.0`**，否则 Traefik 无法到达容器） | `0.0.0.0:8090` | v0 |
 | `LUMEN_DATABASE_URL` | PostgreSQL 连接串（DSN） | `postgres://lumen:***@lumen-db:5432/lumen?sslmode=disable` | v0 |
 | `LUMEN_PUBLIC_IP` | VPS 公网 IP（`SetNAT1To1IPs` 宣告） | `203.0.113.10` | v0 |
 | `LUMEN_WEBRTC_UDP_PORT` | WebRTC 媒体单 UDP 端口（需在 Coolify 裸映射；四处对齐） | `40000` | v0 |

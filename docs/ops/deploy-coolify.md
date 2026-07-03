@@ -40,7 +40,8 @@
 4. 先不部署，先配下面的端口/环境变量/域名。
 
 ## 3. 端口（关键：HTTP 走 Traefik，WebRTC 走裸 UDP）
-- [ ] **Ports Exposes** = `8080` （容器内明文 HTTP/WS，Traefik 据此反代、终结 TLS）。
+- [ ] **Ports Exposes** = `8090` （容器内明文 HTTP/WS，Traefik 据此反代、终结 TLS）。
+  - ⚠️ **端口从 8080 改为 8090**：本宿主机上 `127.0.0.1:8080` 已被其它服务占用（容器内探测 `/api/v1/healthz` 返回 **502 Bad Gateway** 而非本服务的 200），故本服务改用 **8090**。三处必须同时一致：**Ports Exposes** `8090` = env **`LUMEN_LISTEN_ADDR=0.0.0.0:8090`** = **Health Check 的 Port** `8090`（见 §7）。
 - [ ] **Ports Mappings** = `40000:40000/udp` （WebRTC 媒体，裸 UDP 直发宿主机、**不经 Traefik**）。
   - 若该版本 Coolify 的 Ports Mappings 不接受 `/udp`：改用 **Docker Compose 部署类型**，在 compose `ports:` 写 `"40000:40000/udp"`（见 [调研 02 §6.2](../research/02-coolify-udp.md)）。
   - ⚠️ 用了 Ports Mappings 会**失去 Rolling Updates**（重部署有短暂中断，语音会重连，可接受）。
@@ -55,7 +56,7 @@ LUMEN_OAUTH_ISSUER      = https://www.nanako.org                        # 自建
 LUMEN_OAUTH_JWKS_URL    = https://www.nanako.org/.well-known/jwks.json
 LUMEN_OAUTH_AUDIENCE    = lumen-api
 LUMEN_OWNER_SUBJECTS    = <owner-sub-1>,<owner-sub-2>
-LUMEN_LISTEN_ADDR       = 0.0.0.0:8080          # 必须 0.0.0.0，否则 Traefik 到不了容器
+LUMEN_LISTEN_ADDR       = 0.0.0.0:8090          # 必须 0.0.0.0；端口须与 Ports Exposes / Health Check 一致（8080 被占→改 8090）
 LUMEN_PUBLIC_IP         = <VPS_PUBLIC_IP>       # SetNAT1To1IPs 宣告，WebRTC 必需
 LUMEN_WEBRTC_UDP_PORT   = 40000                 # 与 Ports Mappings 一致
 LUMEN_PUBLIC_WS_URL     = wss://api.lumen.nanako.com.cn/ws
@@ -87,7 +88,7 @@ LUMEN_REFRESH_ENC_KEY            = <openssl rand -base64 32>     # refresh_token
 >
 > `LUMEN_OAUTH_AUDIENCE=lumen-api` 必须与中介换 token 时请求的 audience、以及 IdP 侧一致（见配置对齐矩阵 [`idp-setup.md`](./idp-setup.md)）。
 
-> **本服务器现在同时提供的 HTTP 面**（同一 `:8080`、同一 CORS 中间件后）：
+> **本服务器现在同时提供的 HTTP 面**（同一 `:8090`、同一 CORS 中间件后）：
 > - 资源服务器（Bearer）：`/api/v1/*`（`/api/v1/healthz`、`/api/v1/bootstrap`、`/api/v1/me` …）+ `/ws`。
 > - 桌面中介：`GET /desktop/login`、`GET /desktop/callback`、`POST /api/desktop/exchange`、`POST /api/desktop/refresh`、`POST /api/desktop/logout`。
 > - 账户中心（cookie 认证）：`GET /auth/login`、`GET /auth/callback`、`POST /auth/logout`、`GET /api/me`（cookie 版 me，区别于 Bearer 版 `/api/v1/me`）。
@@ -103,14 +104,16 @@ LUMEN_REFRESH_ENC_KEY            = <openssl rand -base64 32>     # refresh_token
 - 注意：数据库持久化由**第 1 步的 PostgreSQL 资源**负责，应用容器本身**无需**数据卷。
 
 ## 7. 健康检查
-- [ ] **Health Check** = `GET /api/v1/healthz`（Coolify 探活；返回 `{"success":true,...}`）。
+- [ ] **Health Check**：Type `HTTP`、Method `GET`、Scheme `http`、**Host `127.0.0.1`**（**不要用 `localhost`**——容器内可能优先解析成 IPv6 `::1`，而服务只绑 IPv4）、**Port `8090`**、Path `/api/v1/healthz`、Return Code `200`、Response Text **留空**、Start Period `30`。
+  - ⚠️ Coolify 生成的探测命令形如 `curl ... || wget ...`；alpine 无 `curl`（会 `curl: not found`），靠 `wget` 兜底，所以 Host/Port/Path 必须精确对上正在监听的 `0.0.0.0:8090`。
+  - 改动健康检查后**必须 Redeploy** 才生效（探针在容器创建时写入）。
 
 ## 8. 防火墙 / 安全组
 - [ ] 云安全组放行入站 **`443/tcp`**（HTTPS/WSS）+ **`40000/udp`**（WebRTC）。
 - [ ] ⚠️ Docker 的 iptables 会绕过主机 UFW —— **优先用云安全组**；若用 UFW 需配 `ufw-docker`。
 
 ## 9. 部署 + 验证
-1. 点 **Deploy**。查看 Build/Runtime 日志：应看到 `listening addr=0.0.0.0:8080 udp=40000`，且**启动时幂等建表 + 种子频道**（大厅 / 开黑1）；中介表（会话/握手/refresh）也在此幂等建好。
+1. 点 **Deploy**。查看 Build/Runtime 日志：应看到 `listening addr=0.0.0.0:8090 udp=40000`，且**启动时幂等建表 + 种子频道**（大厅 / 开黑1）；中介表（会话/握手/refresh）也在此幂等建好。
 2. 校验（用仓库 [`scripts/`](../../scripts)）：
    - `GET https://api.lumen.nanako.com.cn/api/v1/healthz` → `200`。
    - 带真实 IdP 的 `access_token`（`aud=lumen-api`）打 `GET /api/v1/bootstrap` → 返回 me/channels/members；WS 首帧 `auth` → 收到 `auth_ok`。参见 [`verify-login.md`](./verify-login.md)、`scripts/smoke-server.sh`。
