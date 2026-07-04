@@ -54,7 +54,7 @@ export default function HeroSection() {
         </ul>
       </div>
 
-      <div className="mx-auto w-full min-w-0 max-w-[420px] lg:animate-float">
+      <div className="mx-auto w-full min-w-0 max-w-[420px] transform-gpu will-change-transform lg:animate-float">
         <ProductShot />
       </div>
     </section>

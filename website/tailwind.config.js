@@ -78,15 +78,10 @@ export default {
           "0%,100%": { transform: "scaleY(.3)" },
           "50%": { transform: "scaleY(1)" },
         },
-        orbpulse: {
-          "0%,100%": {
-            boxShadow:
-              "0 0 40px 6px rgba(91,110,245,.4), inset 0 -6px 14px rgba(40,44,120,.35)",
-          },
-          "50%": {
-            boxShadow:
-              "0 0 56px 10px rgba(91,110,245,.55), inset 0 -6px 14px rgba(40,44,120,.35)",
-          },
+        // 光球呼吸：仅动画 opacity/transform（合成器友好），不再动画 box-shadow。
+        glow: {
+          "0%,100%": { opacity: ".5", transform: "scale(1)" },
+          "50%": { opacity: ".9", transform: "scale(1.14)" },
         },
         caret: { "0%,100%": { opacity: ".4" }, "50%": { opacity: "1" } },
         spin: { to: { transform: "rotate(360deg)" } },
@@ -97,7 +92,7 @@ export default {
       },
       animation: {
         eq: "eq .7s ease-in-out infinite",
-        orbpulse: "orbpulse 3.4s ease-in-out infinite",
+        glow: "glow 3.4s ease-in-out infinite",
         caret: "caret 1.1s ease-in-out infinite",
         spin: "spin .9s linear infinite",
         float: "float 6.5s ease-in-out infinite",

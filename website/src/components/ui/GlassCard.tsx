@@ -18,8 +18,9 @@ export default function GlassCard({
   return (
     <Tag
       className={
-        "rounded-[18px] bg-white/60 shadow-glass shadow-ringcard backdrop-blur-md " +
-        className
+        // 卡片位于平滑的 Aurora 渐变之上，backdrop-blur 视觉上等同于无（渐变无高频细节），
+        // 却会造成持续合成/滚动闪烁；改用略高不透明度的半透明白，观感一致且不再重绘。
+        "rounded-[18px] bg-white/70 shadow-glass shadow-ringcard " + className
       }
     >
       {children}

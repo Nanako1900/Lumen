@@ -43,7 +43,7 @@ export default function ProductShot() {
         }}
       >
         {/* 窗口头 */}
-        <div className="flex h-[38px] items-center justify-between border-b border-white/50 bg-white/50 px-3.5 backdrop-blur-md">
+        <div className="flex h-[38px] items-center justify-between border-b border-white/50 bg-white/70 px-3.5">
           <div className="flex items-center gap-2">
             <span
               className="h-3.5 w-3.5 rounded-full"
@@ -66,7 +66,7 @@ export default function ProductShot() {
         {/* 频道面板 */}
         <div className="px-3 pb-3.5 pt-2">
           <div
-            className="rounded-[15px] bg-white/60 p-1.5 backdrop-blur-md"
+            className="rounded-[15px] bg-white/75 p-1.5"
             style={{
               boxShadow:
                 "0 6px 20px -8px rgba(91,110,245,.28), inset 0 0 0 1px rgba(91,110,245,.14)",
@@ -121,7 +121,7 @@ export default function ProductShot() {
           </div>
 
           {/* 自我控制条 */}
-          <div className="mt-2.5 flex items-center justify-between rounded-[14px] bg-white/60 px-2.5 py-2.5 shadow-[inset_0_0_0_1px_rgba(255,255,255,.6)] backdrop-blur-md">
+          <div className="mt-2.5 flex items-center justify-between rounded-[14px] bg-white/75 px-2.5 py-2.5 shadow-[inset_0_0_0_1px_rgba(255,255,255,.6)]">
             <div className="flex items-center gap-2">
               <span className="h-7 w-7 rounded-full" style={AVATAR} />
               <div className="leading-tight">
