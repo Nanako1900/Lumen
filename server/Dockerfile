@@ -9,6 +9,14 @@
 FROM golang:1.24-alpine AS build
 WORKDIR /src
 
+# Go 模块代理：国内构建宿主机通常直连不了 proxy.golang.org（Google IP，i/o timeout）。
+# 走七牛 goproxy.cn（境内可达）+ direct 兜底，GOSUMDB 用 Google 境内镜像做校验。
+# 关键：这样构建【不依赖】宿主机 http_proxy —— Coolify 会把「运行时」为绕过健康检查
+# 而设的空 http_proxy 一并注入构建，曾使 go mod download 丢代理后连 proxy.golang.org 超时。
+# 已在境外/无墙环境构建时，可用 Coolify build-arg 覆盖 GOPROXY=https://proxy.golang.org,direct。
+ENV GOPROXY=https://goproxy.cn,direct \
+    GOSUMDB=sum.golang.google.cn
+
 # 先拷依赖清单以复用 layer 缓存。
 COPY go.mod go.sum ./
 RUN go mod download
