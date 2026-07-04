@@ -1,9 +1,10 @@
 import PageSection from "../components/PageSection";
+import GlassCard from "../components/ui/GlassCard";
 
 const faqs = [
   {
     q: "如何登录？",
-    a: "打开桌面客户端点击登录，系统浏览器会跳转到官网完成 OIDC 授权，随后自动返回客户端。你的凭据不会保存在本机明文文件中。",
+    a: "打开桌面客户端点击登录，系统浏览器会跳转到你的 OAuth 服务器完成 PKCE 授权，随后自动返回客户端。你的凭据不会保存在本机明文文件中。",
   },
   {
     q: "连接不上语音怎么办？",
@@ -15,19 +16,19 @@ const faqs = [
   },
   {
     q: "支持哪些平台？",
-    a: "当前提供 Windows 桌面客户端。所有聊天与语音能力均在桌面客户端内，官网不提供网页聊天/语音。",
+    a: "当前提供 Windows 桌面客户端。所有聊天与语音能力均在桌面客户端内，官网不提供网页聊天 / 语音。",
   },
 ];
 
 export default function Help() {
   return (
-    <PageSection title="帮助" subtitle="常见问题与排障指引。">
+    <PageSection title="帮助" subtitle="常见问题与排障指引。" eyebrow="支持">
       <dl className="space-y-4">
         {faqs.map((item) => (
-          <div key={item.q} className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-            <dt className="font-semibold text-zinc-100">{item.q}</dt>
-            <dd className="mt-2 text-sm leading-relaxed text-zinc-400">{item.a}</dd>
-          </div>
+          <GlassCard key={item.q} as="div" className="p-6">
+            <dt className="font-bold text-ink">{item.q}</dt>
+            <dd className="mt-2 text-[14px] leading-relaxed text-ink-muted">{item.a}</dd>
+          </GlassCard>
         ))}
       </dl>
     </PageSection>

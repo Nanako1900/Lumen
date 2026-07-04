@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 html,
@@ -14,4 +14,23 @@ body,
 
 body {
   margin: 0;
+  /* 兜底底色；主 Aurora 渐变由 Layout 的固定图层提供，移动端更稳。 */
+  background-color: #eef0f8;
+  color: #1c1f2e;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Microsoft YaHei", "Segoe UI", Roboto, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 尊重系统「减弱动态效果」：说话高亮/呼吸发光等动画一律停用。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

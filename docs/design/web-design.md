@@ -277,16 +277,21 @@ internal/secure/                    # 加密（commit 82f344e 落地）
 internal/store/                     # broker 表读写（handoff/desktop 会话/网页会话）+ 既有 users/channels/messages
 ```
 
-### 4.4 Tailwind 约定（深色为主）
+### 4.4 Tailwind 约定（Aurora Indigo · 浅色玻璃拟态）
 
-- **主题**：深色为默认（`<html class="dark">` 常驻，不提供亮色切换，与 backlog「亮色主题」一致推迟）。
-- **调色板**（`tailwind.config.js` 扩展，示意）：
-  - 背景：`bg-zinc-950` / 卡片 `bg-zinc-900` / 边框 `border-zinc-800`
-  - 文本：主 `text-zinc-100` / 次 `text-zinc-400`
-  - 强调：`text-indigo-400` / 主按钮 `bg-indigo-600 hover:bg-indigo-500`
-- **排版**：`font-sans`（系统字体栈）；标题 `tracking-tight`；正文 `leading-relaxed`。
-- **布局**：容器 `max-w-5xl mx-auto px-4`；卡片 `rounded-2xl shadow-lg`；响应式以 `md:` 断点为主。
-- **可访问性**：交互元素 `focus-visible:ring-2 ring-indigo-400`；对比度满足 WCAG AA。
+> 官网视觉以设计稿 `外观设计稿/Lumen 网页端.dc.html`（1a–1f）为准，采用 **Aurora Indigo** 浅色系（靛蓝
+> #5b6ef5 + 极光青 #29d4b4 + 玻璃质感 + 发光光点），单一浅色主题，不提供暗色切换（旧「深色为默认」方案已弃用）。
+
+- **主题**：浅色为默认且唯一（`color-scheme: light`；固定 `bg-aurora` 渐变底图层）。
+- **调色板**（`tailwind.config.js` 扩展语义色）：
+  - 品牌：`brand`（#5b6ef5，`deep` #3e44c4）/ 极光：`aurora`（#29d4b4，`deep` #17b47e）
+  - 文本：`ink`（#1c1f2e）/ `ink-muted`（#565c74）/ `ink-faint`（#939ab0）
+  - 表面：玻璃卡 `bg-white/60 + backdrop-blur + shadow-ringcard`；主按钮 `bg-brand text-white shadow-cta`；页面 `bg-aurora`
+  - 语义：`danger` #ec4c56 / `warn` #e3a015；品牌光球 `bg-orb`
+- **排版**：`font-sans`（系统字体栈，含 PingFang SC）；标题 `font-extrabold tracking-tight`；正文 `leading-relaxed`。
+- **布局**：容器 `max-w-content(72rem) mx-auto px-5 md:px-10`；卡片 `rounded-[18px]`；响应式 `sm:/md:/lg:` 断点。
+- **动效**：说话 `animate-eq`、光球呼吸 `animate-orbpulse`、终端光标 `animate-caret` 等；统一 `@media (prefers-reduced-motion)` 降级。
+- **可访问性**：交互元素 `focus-visible:ring-2 ring-brand`；装饰元素 `aria-hidden`；对比度满足 WCAG AA。
 
 ---
 

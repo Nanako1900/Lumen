@@ -15,3 +15,7 @@ export const UPDATES_LATEST_URL: string =
 /** 官网基址（展示用）。 */
 export const WEB_BASE_URL: string =
   import.meta.env.VITE_WEB_BASE_URL ?? "https://example.com";
+
+/** 开源仓库地址（展示用，非机密，可配置）。 */
+export const GITHUB_URL: string =
+  import.meta.env.VITE_GITHUB_URL ?? "https://github.com";

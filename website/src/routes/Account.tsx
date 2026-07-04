@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import ProfileCard from "../components/ProfileCard";
-import PageSection from "../components/PageSection";
+import GlassCard from "../components/ui/GlassCard";
+import Orb from "../components/ui/Orb";
+import { buttonClass } from "../components/ui/button";
+import { AlertTriangleIcon, DownloadIcon, LogOutIcon } from "../components/icons";
 import { fetchMe, goToLogin, logout, type MeResponse } from "../lib/api";
 
 type LoadState =
@@ -39,58 +42,115 @@ export default function Account() {
   }
 
   return (
-    <PageSection title="账户中心" subtitle="查看资料、下载客户端与退出登录。">
+    <div className="mx-auto max-w-2xl px-5 py-14 md:px-10">
+      <header className="mb-8">
+        <h1 className="text-[2.1rem] font-extrabold tracking-[-0.01em] text-ink">账户</h1>
+        <p className="mt-3 text-[15px] text-ink-muted">
+          查看资料、下载客户端与退出登录。
+        </p>
+      </header>
+
       {loginError && (
-        <div className="rounded-xl border border-amber-800/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-300">
+        <div className="mb-6 flex items-center gap-2.5 rounded-2xl bg-warn/10 px-4 py-3 text-sm text-warn-deep shadow-[inset_0_0_0_1px_rgba(227,160,21,.25)]">
+          <AlertTriangleIcon size={16} className="flex-none" />
           登录未完成（{loginError}），请重试。
         </div>
       )}
 
-      {state.status === "loading" && (
-        <p className="text-zinc-400" role="status">
-          正在加载账户信息…
-        </p>
-      )}
-
-      {state.status === "error" && (
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <p className="text-zinc-300">加载账户信息失败，请稍后重试。</p>
-        </div>
-      )}
-
-      {state.status === "anon" && (
-        <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-8 text-center shadow-lg">
-          <p className="text-zinc-300">登录后可查看你的资料并下载客户端。</p>
-          <button
-            type="button"
-            onClick={goToLogin}
-            className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-6 py-3 text-base font-semibold text-white transition-colors hover:bg-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
-          >
-            登录
-          </button>
-        </div>
-      )}
-
+      {state.status === "loading" && <LoadingState />}
+      {state.status === "error" && <ErrorState />}
+      {state.status === "anon" && <AnonState />}
       {state.status === "authed" && (
-        <div className="space-y-6">
-          <ProfileCard profile={state.profile} />
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <Link
-              to="/download"
-              className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-5 py-2.5 font-semibold text-white transition-colors hover:bg-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
-            >
-              下载客户端
-            </Link>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="inline-flex items-center justify-center rounded-xl border border-zinc-700 px-5 py-2.5 font-semibold text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
-            >
-              退出登录
-            </button>
+        <AuthedState profile={state.profile} onLogout={handleLogout} />
+      )}
+    </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <GlassCard className="p-6" >
+      <div role="status" aria-live="polite">
+        <div className="flex items-center gap-5">
+          <div className="h-16 w-16 flex-none animate-pulse rounded-full bg-brand/10" />
+          <div className="flex-1 space-y-2">
+            <div className="h-3 w-16 animate-pulse rounded bg-black/[0.06]" />
+            <div className="h-5 w-32 animate-pulse rounded bg-brand/10" />
           </div>
         </div>
-      )}
-    </PageSection>
+        <span className="sr-only">正在加载账户信息…</span>
+      </div>
+    </GlassCard>
+  );
+}
+
+function ErrorState() {
+  return (
+    <GlassCard className="p-6 text-center">
+      <p className="text-ink">加载账户信息失败，请稍后重试。</p>
+    </GlassCard>
+  );
+}
+
+/** 未登录：品牌光球 + 浏览器登录（顶层导航到 broker /auth/login）。 */
+function AnonState() {
+  return (
+    <GlassCard className="p-8 text-center shadow-card">
+      <Orb size={56} glow className="mx-auto" />
+      <h2 className="mt-4 text-xl font-bold text-ink">登录 Lumen 账户中心</h2>
+      <p className="mx-auto mt-2 max-w-xs text-[13.5px] leading-relaxed text-ink-muted">
+        登录后可查看你的资料并下载客户端。
+      </p>
+      <button
+        type="button"
+        onClick={goToLogin}
+        className={buttonClass("primary", "lg", "mx-auto mt-6 w-full max-w-xs")}
+      >
+        使用浏览器登录
+      </button>
+      <p className="mt-3 text-[12px] text-ink-faint">
+        将在系统浏览器完成登录后自动返回
+      </p>
+    </GlassCard>
+  );
+}
+
+function AuthedState({
+  profile,
+  onLogout,
+}: {
+  profile: MeResponse;
+  onLogout: () => void;
+}) {
+  return (
+    <div className="space-y-5">
+      <ProfileCard profile={profile} />
+
+      <GlassCard className="flex flex-col items-start justify-between gap-4 p-6 sm:flex-row sm:items-center">
+        <div>
+          <div className="text-[14px] font-bold text-ink">下载桌面客户端</div>
+          <div className="mt-0.5 text-[12.5px] text-ink-faint">
+            所有聊天与语音都在 Windows 客户端内。
+          </div>
+        </div>
+        <Link to="/download" className={buttonClass("primary", "md")}>
+          <DownloadIcon size={15} />
+          下载客户端
+        </Link>
+      </GlassCard>
+
+      <GlassCard className="flex flex-col items-start justify-between gap-4 p-6 sm:flex-row sm:items-center">
+        <div>
+          <div className="text-[14px] font-bold text-ink">退出登录</div>
+          <div className="mt-0.5 text-[12.5px] text-ink-faint">
+            清除本浏览器的账户中心会话。
+          </div>
+        </div>
+        <button type="button" onClick={onLogout} className={buttonClass("danger", "md")}>
+          <LogOutIcon size={15} />
+          退出登录
+        </button>
+      </GlassCard>
+    </div>
   );
 }
