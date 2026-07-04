@@ -137,7 +137,7 @@ func (h *Handler) desktopLogin(w http.ResponseWriter, r *http.Request) {
 		CodeChallenge: oidcChallenge,
 		State:         oidcState,
 		RedirectURI:   h.cfg.OAuthDesktopRedirect,
-		Scope:         desktopScope,
+		Scope:         h.cfg.OAuthDesktopScope,
 		Audience:      h.cfg.OAuthAudience,
 	})
 	if err != nil {
@@ -191,8 +191,7 @@ func (h *Handler) desktopCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sub := subjectFrom(token.IDToken, token.AccessToken)
-	profile := h.oidc.fetchProfile(r.Context(), token.AccessToken, token.IDToken)
+	sub, profile := h.oidc.fetchIdentity(r.Context(), token.AccessToken, token.IDToken)
 
 	handoffCode := randomToken(tokenBytes)
 	if err := h.store.PutHandoff(r.Context(), handoffCode, store.Handoff{
@@ -369,7 +368,7 @@ func (h *Handler) authLogin(w http.ResponseWriter, r *http.Request) {
 		CodeChallenge: challenge,
 		State:         state,
 		RedirectURI:   h.cfg.OAuthWebRedirect,
-		Scope:         webScope,
+		Scope:         h.cfg.OAuthWebScope,
 		// no audience: account center does not request aud=lumen-api
 	})
 	if err != nil {
@@ -415,8 +414,7 @@ func (h *Handler) authCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sub := subjectFrom(token.IDToken, token.AccessToken)
-	profile := h.oidc.fetchProfile(r.Context(), token.AccessToken, token.IDToken)
+	sub, profile := h.oidc.fetchIdentity(r.Context(), token.AccessToken, token.IDToken)
 
 	sessionVal, err := sealSession(h.sealer, webSession{
 		Sub:         sub,

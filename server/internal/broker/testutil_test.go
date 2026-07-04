@@ -103,6 +103,8 @@ func testConfig() config.Config {
 		OAuthDesktopRedirect: "https://acct.example.com/desktop/callback",
 		OAuthWebRedirect:     "https://acct.example.com/auth/callback",
 		WebBaseURL:           "https://acct.example.com",
+		OAuthWebScope:        "openid profile email",
+		OAuthDesktopScope:    "openid profile email offline_access",
 	}
 }
 

@@ -18,21 +18,50 @@ const (
 	defaultLogLevel   = "info"
 )
 
+// Auth modes (LUMEN_AUTH_MODE) select how the resource server validates tokens.
+const (
+	// AuthModeJWKS (default) verifies a JWT access_token offline via JWKS — for
+	// OIDC providers that issue signed JWTs and expose a JWKS endpoint.
+	AuthModeJWKS = "jwks"
+	// AuthModeUserinfo introspects an opaque access_token via the IdP userinfo
+	// endpoint — for plain-OAuth2 providers (no openid scope / no JWKS), e.g.
+	// Nanako OAuth.
+	AuthModeUserinfo = "userinfo"
+)
+
+// Default OAuth scopes per mode. OIDC needs openid (+ offline_access for a
+// desktop refresh_token); plain OAuth2 providers reject openid, so userinfo mode
+// defaults to profile+email. Both are overridable via env.
+const (
+	defaultWebScopeOIDC       = "openid profile email"
+	defaultDesktopScopeOIDC   = "openid profile email offline_access"
+	defaultWebScopeOAuth2     = "profile email"
+	defaultDesktopScopeOAuth2 = "profile email"
+)
+
 // Config is the immutable runtime configuration. Once loaded it is never
 // mutated; callers treat it as read-only.
 type Config struct {
+	// AuthMode selects token validation (AuthModeJWKS default | AuthModeUserinfo).
+	AuthMode string
+
 	OAuthIssuer      string
 	OAuthJWKSURL     string
-	OAuthUserinfoURL string // optional; derived via OIDC discovery when empty
+	OAuthUserinfoURL string // optional in jwks mode; REQUIRED in userinfo mode
 	OAuthAudience    string
 	OwnerSubjects    []string
-	ListenAddr       string
-	DatabaseURL      string
-	PublicIP         string
-	WebRTCUDPPort    int
-	PublicWSURL      string // optional; derived from Host header when empty
-	UpdatesDir       string
-	LogLevel         string
+
+	// OAuth scopes sent to the IdP authorize endpoint. Defaults depend on
+	// AuthMode (openid… for jwks, profile email for userinfo); env-overridable.
+	OAuthWebScope     string
+	OAuthDesktopScope string
+	ListenAddr        string
+	DatabaseURL       string
+	PublicIP          string
+	WebRTCUDPPort     int
+	PublicWSURL       string // optional; derived from Host header when empty
+	UpdatesDir        string
+	LogLevel          string
 
 	// --- Account center / desktop broker (web-design.md §5, §6, §9) ---
 	// These back the account center / desktop login broker on the Go server. The confidential
@@ -88,11 +117,26 @@ func Load() (Config, error) {
 		return v
 	}
 
+	// Auth mode is read first: it decides which OIDC/OAuth2 keys are required and
+	// which scope defaults apply. Unknown values are reported like a missing key.
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("LUMEN_AUTH_MODE")))
+	if mode == "" {
+		mode = AuthModeJWKS
+	}
+	if mode != AuthModeJWKS && mode != AuthModeUserinfo {
+		missing = append(missing, "LUMEN_AUTH_MODE(无效: 取值 jwks|userinfo)")
+	}
+	userinfoMode := mode == AuthModeUserinfo
+
 	c := Config{
-		OAuthIssuer:      get("LUMEN_OAUTH_ISSUER", true),
-		OAuthJWKSURL:     get("LUMEN_OAUTH_JWKS_URL", true),
-		OAuthUserinfoURL: get("LUMEN_OAUTH_USERINFO_URL", false),
-		OAuthAudience:    get("LUMEN_OAUTH_AUDIENCE", true),
+		AuthMode: mode,
+		// jwks mode verifies JWT via JWKS (needs issuer/jwks/aud). userinfo mode
+		// introspects via the userinfo endpoint (needs userinfo/authorize/token
+		// URLs explicitly, since a plain-OAuth2 IdP has no OIDC discovery).
+		OAuthIssuer:      get("LUMEN_OAUTH_ISSUER", !userinfoMode),
+		OAuthJWKSURL:     get("LUMEN_OAUTH_JWKS_URL", !userinfoMode),
+		OAuthUserinfoURL: get("LUMEN_OAUTH_USERINFO_URL", userinfoMode),
+		OAuthAudience:    get("LUMEN_OAUTH_AUDIENCE", !userinfoMode),
 		OwnerSubjects:    splitCSV(get("LUMEN_OWNER_SUBJECTS", true)),
 		ListenAddr:       get("LUMEN_LISTEN_ADDR", true),
 		DatabaseURL:      get("LUMEN_DATABASE_URL", true),
@@ -102,18 +146,23 @@ func Load() (Config, error) {
 		LogLevel:         orDefault(get("LUMEN_LOG_LEVEL", false), defaultLogLevel),
 
 		// Account center / desktop broker. client_secret, both redirect URIs
-		// and web base are required; authorize/token URLs are optional and
-		// derived from OIDC discovery when empty (mirrors env.ts).
+		// and web base are always required. authorize/token URLs are derived from
+		// OIDC discovery when empty in jwks mode, but REQUIRED in userinfo mode
+		// (no discovery on a plain-OAuth2 IdP).
 		OAuthClientID:        get("LUMEN_OAUTH_CLIENT_ID", true),
 		OAuthClientSecret:    get("LUMEN_OAUTH_CLIENT_SECRET", true),
-		OAuthAuthorizeURL:    get("LUMEN_OAUTH_AUTHORIZE_URL", false),
-		OAuthTokenURL:        get("LUMEN_OAUTH_TOKEN_URL", false),
+		OAuthAuthorizeURL:    get("LUMEN_OAUTH_AUTHORIZE_URL", userinfoMode),
+		OAuthTokenURL:        get("LUMEN_OAUTH_TOKEN_URL", userinfoMode),
 		OAuthDesktopRedirect: get("LUMEN_OAUTH_DESKTOP_REDIRECT_URI", true),
 		OAuthWebRedirect:     get("LUMEN_OAUTH_WEB_REDIRECT_URI", true),
 		WebBaseURL:           get("LUMEN_WEB_BASE_URL", true),
 	}
-	// USERINFO_URL is optional here too (env.ts marks it required, but oidc.ts
-	// no-ops when absent); keep the existing optional treatment above.
+
+	// Scope defaults depend on mode; env overrides win.
+	c.OAuthWebScope = orDefault(get("LUMEN_OAUTH_WEB_SCOPE", false),
+		pick(userinfoMode, defaultWebScopeOAuth2, defaultWebScopeOIDC))
+	c.OAuthDesktopScope = orDefault(get("LUMEN_OAUTH_DESKTOP_SCOPE", false),
+		pick(userinfoMode, defaultDesktopScopeOAuth2, defaultDesktopScopeOIDC))
 
 	portStr := get("LUMEN_WEBRTC_UDP_PORT", true)
 	if portStr != "" {
@@ -192,4 +241,12 @@ func orDefault(v, def string) string {
 		return def
 	}
 	return v
+}
+
+// pick returns a when cond is true, else b (a tiny string ternary).
+func pick(cond bool, a, b string) string {
+	if cond {
+		return a
+	}
+	return b
 }

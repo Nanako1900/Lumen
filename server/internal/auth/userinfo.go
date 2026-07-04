@@ -2,26 +2,21 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
+
+	"lumen/internal/userinfo"
 )
 
 // userinfoTimeout bounds the userinfo call so a slow IdP never blocks login;
 // failure degrades gracefully to claims-only (contract §2.7 兜底).
 const userinfoTimeout = 3 * time.Second
-
-// userinfoClaims is the subset of userinfo response fields we consume.
-type userinfoClaims struct {
-	Name              string `json:"name"`
-	PreferredUsername string `json:"preferred_username"`
-	Picture           string `json:"picture"`
-}
 
 // ProfileEnricher fetches missing name/picture from the userinfo endpoint
 // (contract §2.7). The endpoint is discovered from the issuer via OIDC
@@ -86,21 +81,22 @@ func (e *ProfileEnricher) Enrich(ctx context.Context, rawToken string, p Profile
 		return p
 	}
 
-	var uc userinfoClaims
-	if err := json.NewDecoder(resp.Body).Decode(&uc); err != nil {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return p
+	}
+	info, err := userinfo.Parse(body)
+	if err != nil {
 		return p
 	}
 
-	name := strings.TrimSpace(uc.Name)
-	if name == "" {
-		name = strings.TrimSpace(uc.PreferredUsername)
-	}
+	name := strings.TrimSpace(info.DisplayName)
 	out := p
 	if p.DisplayName == p.Subject && name != "" {
 		out.DisplayName = name
 	}
-	if p.AvatarURL == "" && strings.TrimSpace(uc.Picture) != "" {
-		out.AvatarURL = strings.TrimSpace(uc.Picture)
+	if p.AvatarURL == "" && strings.TrimSpace(info.AvatarURL) != "" {
+		out.AvatarURL = strings.TrimSpace(info.AvatarURL)
 	}
 	return out
 }

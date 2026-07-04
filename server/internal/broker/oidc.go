@@ -14,6 +14,7 @@ import (
 	goidc "github.com/coreos/go-oidc/v3/oidc"
 
 	"lumen/internal/store"
+	"lumen/internal/userinfo"
 )
 
 // oidcTimeout bounds every outbound IdP call (token / userinfo) so a slow IdP
@@ -269,6 +270,60 @@ func profileFromClaims(claims map[string]any) store.DesktopProfile {
 		name = str("nickname")
 	}
 	return store.DesktopProfile{DisplayName: name, AvatarURL: str("picture")}
+}
+
+// fetchIdentity resolves both the subject and the display profile for a token
+// pair. It prefers JWT claims (OIDC id_token / JWT access_token); when the token
+// carries no parseable sub (plain-OAuth2 opaque tokens, e.g. Nanako OAuth) it
+// derives sub + profile from /userinfo via the flexible parser. Returns an empty
+// sub only when neither source yields one — the caller decides how to handle it.
+func (c *oidcClient) fetchIdentity(ctx context.Context, accessToken, idToken string) (string, store.DesktopProfile) {
+	if sub := subjectFrom(idToken, accessToken); sub != "" {
+		p := profileFromJWT(idToken, accessToken)
+		if p.DisplayName != "" && p.AvatarURL != "" {
+			return sub, p
+		}
+		u := c.fetchUserinfoInfo(ctx, accessToken)
+		return sub, store.DesktopProfile{
+			DisplayName: firstNonEmpty(p.DisplayName, u.DisplayName),
+			AvatarURL:   firstNonEmpty(p.AvatarURL, u.AvatarURL),
+		}
+	}
+	// No JWT subject: opaque token — everything comes from userinfo.
+	u := c.fetchUserinfoInfo(ctx, accessToken)
+	return u.Subject, store.DesktopProfile{DisplayName: u.DisplayName, AvatarURL: u.AvatarURL}
+}
+
+// fetchUserinfoInfo calls the userinfo endpoint and returns the flexibly-parsed
+// identity (sub/name/avatar/email), or a zero Info on any failure or when no
+// userinfo URL is configured.
+func (c *oidcClient) fetchUserinfoInfo(ctx context.Context, accessToken string) userinfo.Info {
+	if c.cfg.UserinfoURL == "" {
+		return userinfo.Info{}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.cfg.UserinfoURL, nil)
+	if err != nil {
+		return userinfo.Info{}
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return userinfo.Info{}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return userinfo.Info{}
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return userinfo.Info{}
+	}
+	info, err := userinfo.Parse(body)
+	if err != nil {
+		return userinfo.Info{}
+	}
+	return info
 }
 
 // fetchProfile resolves the display profile, preferring id_token/access_token

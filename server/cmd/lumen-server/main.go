@@ -93,11 +93,23 @@ func run() error {
 		return err
 	}
 
-	// 3) Auth: JWKS verifier (background refresh bound to rootCtx), owner set,
-	// and the optional userinfo profile enricher (claims-only on discovery fail).
-	verifier, err := auth.NewVerifier(rootCtx, cfg.OAuthJWKSURL, cfg.OAuthIssuer, cfg.OAuthAudience)
-	if err != nil {
-		return err
+	// 3) Auth: token verifier (mode-dependent), owner set, and the optional
+	// userinfo profile enricher (claims-only on discovery fail).
+	//
+	// ModeJWKS verifies a JWT offline via JWKS (OIDC IdPs). ModeUserinfo
+	// introspects an opaque token via the userinfo endpoint (plain-OAuth2 IdPs
+	// with no JWKS, e.g. Nanako OAuth). Both produce the same *auth.Claims, so
+	// the REST middleware and WS handshake downstream are identical.
+	var verifier *auth.Verifier
+	if cfg.AuthMode == config.AuthModeUserinfo {
+		verifier = auth.NewUserinfoVerifier(cfg.OAuthUserinfoURL)
+		logger.Info("鉴权模式: userinfo introspection", "userinfo_url", cfg.OAuthUserinfoURL)
+	} else {
+		verifier, err = auth.NewVerifier(rootCtx, cfg.OAuthJWKSURL, cfg.OAuthIssuer, cfg.OAuthAudience)
+		if err != nil {
+			return err
+		}
+		logger.Info("鉴权模式: JWKS 本地验签", "jwks_url", cfg.OAuthJWKSURL)
 	}
 	owners := auth.NewOwnerSet(cfg.OwnerSubjects)
 

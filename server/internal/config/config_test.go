@@ -44,6 +44,7 @@ var allKeys = []string{
 	"LUMEN_OAUTH_AUTHORIZE_URL", "LUMEN_OAUTH_TOKEN_URL",
 	"LUMEN_OAUTH_DESKTOP_REDIRECT_URI", "LUMEN_OAUTH_WEB_REDIRECT_URI",
 	"LUMEN_WEB_BASE_URL", "LUMEN_SESSION_ENC_KEY", "LUMEN_REFRESH_ENC_KEY",
+	"LUMEN_AUTH_MODE", "LUMEN_OAUTH_WEB_SCOPE", "LUMEN_OAUTH_DESKTOP_SCOPE",
 }
 
 func setEnv(t *testing.T, env map[string]string) {
@@ -234,5 +235,104 @@ func TestLoad_EncKeysMustDiffer(t *testing.T) {
 	_, err := Load()
 	if err == nil || !strings.Contains(err.Error(), "LUMEN_REFRESH_ENC_KEY") {
 		t.Errorf("identical enc keys should fail, got: %v", err)
+	}
+}
+
+func TestLoad_DefaultAuthModeJWKS(t *testing.T) {
+	setEnv(t, requiredEnv())
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c.AuthMode != AuthModeJWKS {
+		t.Errorf("AuthMode = %q, want %q (default)", c.AuthMode, AuthModeJWKS)
+	}
+	if c.OAuthWebScope != defaultWebScopeOIDC {
+		t.Errorf("OAuthWebScope = %q, want %q", c.OAuthWebScope, defaultWebScopeOIDC)
+	}
+	if c.OAuthDesktopScope != defaultDesktopScopeOIDC {
+		t.Errorf("OAuthDesktopScope = %q, want %q", c.OAuthDesktopScope, defaultDesktopScopeOIDC)
+	}
+}
+
+// userinfoEnv is a valid userinfo-mode environment: no jwks/aud/issuer, but the
+// authorize/token/userinfo endpoints set explicitly (no OIDC discovery).
+func userinfoEnv() map[string]string {
+	env := requiredEnv()
+	delete(env, "LUMEN_OAUTH_ISSUER")
+	delete(env, "LUMEN_OAUTH_JWKS_URL")
+	delete(env, "LUMEN_OAUTH_AUDIENCE")
+	env["LUMEN_AUTH_MODE"] = "userinfo"
+	env["LUMEN_OAUTH_AUTHORIZE_URL"] = "https://www.nanako.org/oauth/authorize"
+	env["LUMEN_OAUTH_TOKEN_URL"] = "https://www.nanako.org/oauth/token"
+	env["LUMEN_OAUTH_USERINFO_URL"] = "https://www.nanako.org/oauth/userinfo"
+	return env
+}
+
+func TestLoad_UserinfoMode(t *testing.T) {
+	setEnv(t, userinfoEnv())
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("userinfo mode should not require jwks/aud/issuer, got: %v", err)
+	}
+	if c.AuthMode != AuthModeUserinfo {
+		t.Errorf("AuthMode = %q, want %q", c.AuthMode, AuthModeUserinfo)
+	}
+	if c.OAuthUserinfoURL != "https://www.nanako.org/oauth/userinfo" {
+		t.Errorf("OAuthUserinfoURL = %q", c.OAuthUserinfoURL)
+	}
+	// Scopes default to plain-OAuth2 (no openid).
+	if c.OAuthWebScope != defaultWebScopeOAuth2 {
+		t.Errorf("OAuthWebScope = %q, want %q", c.OAuthWebScope, defaultWebScopeOAuth2)
+	}
+	if c.OAuthDesktopScope != defaultDesktopScopeOAuth2 {
+		t.Errorf("OAuthDesktopScope = %q, want %q", c.OAuthDesktopScope, defaultDesktopScopeOAuth2)
+	}
+	if strings.Contains(c.OAuthWebScope, "openid") {
+		t.Error("userinfo web scope must not contain openid")
+	}
+}
+
+func TestLoad_UserinfoModeMissingEndpoints(t *testing.T) {
+	for _, key := range []string{
+		"LUMEN_OAUTH_USERINFO_URL", "LUMEN_OAUTH_AUTHORIZE_URL", "LUMEN_OAUTH_TOKEN_URL",
+	} {
+		env := userinfoEnv()
+		delete(env, key)
+		setEnv(t, env)
+		_, err := Load()
+		if err == nil {
+			t.Fatalf("%s: userinfo mode should require it", key)
+		}
+		if !strings.Contains(err.Error(), key) {
+			t.Errorf("%s: error should mention it, got: %v", key, err)
+		}
+	}
+}
+
+func TestLoad_ScopeOverride(t *testing.T) {
+	env := userinfoEnv()
+	env["LUMEN_OAUTH_WEB_SCOPE"] = "profile email phone"
+	env["LUMEN_OAUTH_DESKTOP_SCOPE"] = "profile email phone"
+	setEnv(t, env)
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c.OAuthWebScope != "profile email phone" {
+		t.Errorf("OAuthWebScope override = %q", c.OAuthWebScope)
+	}
+	if c.OAuthDesktopScope != "profile email phone" {
+		t.Errorf("OAuthDesktopScope override = %q", c.OAuthDesktopScope)
+	}
+}
+
+func TestLoad_InvalidAuthMode(t *testing.T) {
+	env := requiredEnv()
+	env["LUMEN_AUTH_MODE"] = "bogus"
+	setEnv(t, env)
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "LUMEN_AUTH_MODE") {
+		t.Errorf("invalid auth mode should fail mentioning LUMEN_AUTH_MODE, got: %v", err)
 	}
 }
