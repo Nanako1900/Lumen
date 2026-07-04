@@ -38,8 +38,14 @@ EXPOSE 40000/udp
 # 健康检查：命中公开的 /api/v1/healthz（无需鉴权，静态返回 {"success":true,"data":{"status":"ok"}}，
 # 不依赖 DB，故不会因 DB 抖动误判）。Coolify 据此判断容器就绪并消除“未配置健康检查”提示。
 # alpine 自带 busybox wget。注意：健康检查与 TLS 证书签发无关——证书由 Traefik/ACME 负责。
+#
+# 【回环必须绕过代理】若部署宿主机给容器注入 http_proxy（如国内经 sing-box 172.17.0.1:2080
+# 由 ~/.docker/config.json 注入），busybox wget 会把对 127.0.0.1:8090 的回环请求也发给代理
+# → 代理从宿主机侧回连 127.0.0.1:8090（空）→ 502，容器被误判 unhealthy、Traefik 拒绝路由。
+# busybox wget 不认 no_proxy，故在命令内显式清空代理环境变量，令回环探测直连本容器进程。
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -q -O - http://127.0.0.1:8090/api/v1/healthz >/dev/null 2>&1 || exit 1
+  CMD http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= \
+      wget -q -O - http://127.0.0.1:8090/api/v1/healthz >/dev/null 2>&1 || exit 1
 
 USER app
 ENTRYPOINT ["/app/lumen-server"]
