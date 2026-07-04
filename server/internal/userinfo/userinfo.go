@@ -9,6 +9,7 @@ package userinfo
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -59,6 +60,22 @@ func FromMap(m map[string]any) Info {
 		}
 	}
 	return info
+}
+
+// Keys returns the sorted top-level object keys of a userinfo body, for
+// diagnostics when Subject extraction fails (field names only — never values, so
+// no PII/token leaks into logs). Returns nil for a non-object body.
+func Keys(body []byte) []string {
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func extract(m map[string]any) Info {

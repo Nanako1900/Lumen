@@ -28,7 +28,7 @@ func newUserinfoStub(t *testing.T, body string) (*httptest.Server, *int64) {
 
 func TestUserinfoVerify_Success(t *testing.T) {
 	srv, _ := newUserinfoStub(t, `{"id":42,"username":"nanako","avatar":"https://x/a.png"}`)
-	v := NewUserinfoVerifier(srv.URL)
+	v := NewUserinfoVerifier(srv.URL, nil)
 
 	claims, err := v.Verify("good")
 	if err != nil {
@@ -47,7 +47,7 @@ func TestUserinfoVerify_Success(t *testing.T) {
 
 func TestUserinfoVerify_RejectsBadToken(t *testing.T) {
 	srv, _ := newUserinfoStub(t, `{"id":1}`)
-	v := NewUserinfoVerifier(srv.URL)
+	v := NewUserinfoVerifier(srv.URL, nil)
 
 	if _, err := v.Verify("bad"); err == nil {
 		t.Fatal("Verify(bad) = nil error, want rejection")
@@ -59,7 +59,7 @@ func TestUserinfoVerify_RejectsBadToken(t *testing.T) {
 
 func TestUserinfoVerify_MissingSubjectIsError(t *testing.T) {
 	srv, _ := newUserinfoStub(t, `{"username":"noid"}`)
-	v := NewUserinfoVerifier(srv.URL)
+	v := NewUserinfoVerifier(srv.URL, nil)
 
 	if _, err := v.Verify("good"); err == nil {
 		t.Fatal("Verify with no subject field = nil error, want error")
@@ -68,7 +68,7 @@ func TestUserinfoVerify_MissingSubjectIsError(t *testing.T) {
 
 func TestUserinfoVerify_CachesWithinTTL(t *testing.T) {
 	srv, hits := newUserinfoStub(t, `{"sub":"s1","name":"A"}`)
-	v := NewUserinfoVerifier(srv.URL)
+	v := NewUserinfoVerifier(srv.URL, nil)
 
 	for i := 0; i < 3; i++ {
 		if _, err := v.Verify("good"); err != nil {
@@ -82,7 +82,7 @@ func TestUserinfoVerify_CachesWithinTTL(t *testing.T) {
 
 func TestUserinfoVerify_RefetchesAfterTTL(t *testing.T) {
 	srv, hits := newUserinfoStub(t, `{"sub":"s1","name":"A"}`)
-	v := NewUserinfoVerifier(srv.URL)
+	v := NewUserinfoVerifier(srv.URL, nil)
 
 	base := time.Unix(1_700_000_000, 0)
 	cur := base

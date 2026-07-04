@@ -102,7 +102,7 @@ func run() error {
 	// the REST middleware and WS handshake downstream are identical.
 	var verifier *auth.Verifier
 	if cfg.AuthMode == config.AuthModeUserinfo {
-		verifier = auth.NewUserinfoVerifier(cfg.OAuthUserinfoURL)
+		verifier = auth.NewUserinfoVerifier(cfg.OAuthUserinfoURL, logger)
 		logger.Info("鉴权模式: userinfo introspection", "userinfo_url", cfg.OAuthUserinfoURL)
 	} else {
 		verifier, err = auth.NewVerifier(rootCtx, cfg.OAuthJWKSURL, cfg.OAuthIssuer, cfg.OAuthAudience)

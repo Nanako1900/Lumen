@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -72,6 +73,7 @@ type Verifier struct {
 	userinfoURL string
 	httpClient  *http.Client
 	cache       *tokenCache
+	logger      *slog.Logger
 }
 
 // NewVerifier builds a ModeJWKS Verifier whose background JWKS refresh goroutine
@@ -87,13 +89,19 @@ func NewVerifier(ctx context.Context, jwksURL, issuer, audience string) (*Verifi
 
 // NewUserinfoVerifier builds a ModeUserinfo Verifier that validates opaque tokens
 // by calling userinfoURL with the token as a Bearer credential (plain-OAuth2 IdPs
-// with no JWKS). Validated identities are cached for userinfoCacheTTL.
-func NewUserinfoVerifier(userinfoURL string) *Verifier {
+// with no JWKS). Validated identities are cached for userinfoCacheTTL. The logger
+// (nil → slog.Default) records the response's field names when a 200 body yields
+// no recognizable subject, so an unexpected IdP schema is diagnosable.
+func NewUserinfoVerifier(userinfoURL string, logger *slog.Logger) *Verifier {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Verifier{
 		mode:        ModeUserinfo,
 		userinfoURL: userinfoURL,
 		httpClient:  &http.Client{Timeout: userinfoVerifyTimeout},
 		cache:       newTokenCache(userinfoCacheTTL),
+		logger:      logger,
 		leeway:      leeway,
 	}
 }
@@ -195,6 +203,10 @@ func (v *Verifier) verifyUserinfo(token string) (*Claims, error) {
 		return nil, err
 	}
 	if info.Subject == "" {
+		// 200 but no recognizable id: surface the field names (not values) so an
+		// unexpected IdP schema can be mapped without guesswork.
+		v.logger.Warn("userinfo 返回 200 但未识别到用户唯一标识；请对照实际字段名",
+			"present_keys", userinfo.Keys(body))
 		return nil, errors.New("userinfo 响应缺少用户唯一标识（sub/id/user_id 等）")
 	}
 
